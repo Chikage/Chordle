@@ -37,6 +37,25 @@ class ChordGameTest {
     }
 
     @Test
+    fun rowsAndCellsBecomeJudgedOnlyAfterSubmit() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+
+        listOf(55, 52, 48).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        assertEquals(false, game.cellIsJudged(0, 0))
+        assertEquals(false, game.rowIsJudged(0))
+
+        game.submitGuess()
+
+        assertEquals(true, game.cellIsJudged(0, 0))
+        assertEquals(true, game.rowIsJudged(0))
+        assertEquals(false, game.rowIsJudged(1))
+    }
+
+    @Test
     fun sanitizePlayableRangeKeepsAtLeastOneOctave() {
         val range = sanitizePlayableRange(60..64)
 
@@ -67,6 +86,88 @@ class ChordGameTest {
         assertEquals(1, sanitizeChordToneCount(-4))
         assertEquals(7, sanitizeChordToneCount(7))
         assertEquals(10, sanitizeChordToneCount(42))
+    }
+
+    @Test
+    fun sanitizeExtraPlayableRangeLimitsEndpointsToC() {
+        assertEquals(36..72, sanitizeExtraPlayableRange(34..77))
+        assertEquals(24..36, sanitizeExtraPlayableRange(21..33))
+        assertEquals(96..108, sanitizeExtraPlayableRange(107..108))
+    }
+
+    @Test
+    fun randomExtraPuzzleUsesCOnlyRangeBoundaries() {
+        repeat(50) {
+            val puzzle = ChordPuzzle.randomExtra(noteCount = 3, noteRange = 34..77, edo = 12)
+
+            assertEquals(true, puzzle.notes.all { it in 36..72 })
+            assertEquals(puzzle.notes.sorted(), puzzle.notes)
+        }
+    }
+
+    @Test
+    fun extraStepTileLabelUsesTwoLinesForNonCSteps() {
+        assertEquals("C3", extraStepTileLabel(96, 24))
+        assertEquals("C3\n+7\\24", extraStepTileLabel(103, 24))
+    }
+
+    @Test
+    fun evaluateExtraGuessUsesFiftyCentTolerance() {
+        val result = evaluateExtraGuess(
+            guess = listOf(97, 108, 100),
+            answer = listOf(96, 108, 120),
+            edo = 24
+        )
+
+        assertEquals(
+            listOf(TileState.ExtraCorrect, TileState.Correct, TileState.Absent),
+            result
+        )
+    }
+
+    @Test
+    fun evaluateExtraGuessMarksNearChordToneWrongPositionPink() {
+        val result = evaluateExtraGuess(
+            guess = listOf(108, 96),
+            answer = listOf(96, 108),
+            edo = 24
+        )
+
+        assertEquals(listOf(TileState.ExtraNear, TileState.ExtraNear), result)
+    }
+
+    @Test
+    fun submitExtraGuessDoesNotWinOnToleranceOnlyCells() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(96, 108), label = "extra"))
+        listOf(97, 109).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        game.submitExtraGuess(24)
+
+        assertEquals(GameStatus.Playing, game.status)
+        assertEquals(
+            listOf(TileState.ExtraCorrect, TileState.ExtraCorrect),
+            (0 until game.columns).map { column -> game.cell(0, column).state }
+        )
+    }
+
+    @Test
+    fun submitExtraGuessWinsOnlyOnExactGreenCells() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(96, 108), label = "extra"))
+        listOf(96, 108).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        game.submitExtraGuess(24)
+
+        assertEquals(GameStatus.Won, game.status)
+        assertEquals(
+            listOf(TileState.Correct, TileState.Correct),
+            (0 until game.columns).map { column -> game.cell(0, column).state }
+        )
     }
 
     @Test

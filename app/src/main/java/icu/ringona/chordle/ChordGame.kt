@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -16,6 +19,14 @@ const val MinimumPlayableRangeSemitones = 12
 const val MinChordToneCount = 1
 const val MaxChordToneCount = 10
 const val DefaultChordToneCount = 3
+const val MinExtraEdo = 1
+const val MaxExtraEdo = 72
+const val DefaultExtraEdo = 24
+const val ExtraPitchToleranceCents = 50.0
+const val LowestExtraPlayableMidiNote = 24
+const val HighestExtraPlayableMidiNote = 108
+const val MinExtraRangeOctave = 1
+const val MaxExtraRangeOctave = 8
 const val MinMidiProgramNumber = 0
 const val MaxMidiProgramNumber = 127
 const val DefaultMidiProgramNumber = 0
@@ -32,7 +43,9 @@ enum class TileState {
     Empty,
     Input,
     Correct,
+    ExtraCorrect,
     Present,
+    ExtraNear,
     Absent
 }
 
@@ -68,6 +81,26 @@ data class ChordPuzzle(
                 "${notes.size}-tone"
             }
             return ChordPuzzle(notes = notes, label = label)
+        }
+
+        fun randomExtra(
+            noteCount: Int = DefaultChordToneCount,
+            noteRange: IntRange = DefaultPlayableRange,
+            edo: Int = DefaultExtraEdo
+        ): ChordPuzzle {
+            val normalizedEdo = sanitizeExtraEdo(edo)
+            val playableRange = sanitizeExtraPlayableRange(noteRange)
+            val sanitizedCount = sanitizeChordToneCount(noteCount)
+            val availableSteps = extraStepRangeForMidiRange(normalizedEdo, playableRange).toList()
+            val notes = availableSteps
+                .shuffled()
+                .take(sanitizedCount.coerceAtMost(availableSteps.size))
+                .sorted()
+            return ChordPuzzle(
+                notes = notes,
+                label = "${normalizedEdo}EDO",
+                answerLabel = notes.joinToString("  ") { extraStepLabel(it, normalizedEdo) }
+            )
         }
 
         fun randomOvertones(
@@ -162,6 +195,26 @@ class ChordleGame(
     }
 
     fun submitGuess(itemName: String = "音") {
+        submitGuessWithResult(
+            itemName = itemName,
+            resultForGuess = { guess -> evaluateGuess(guess, puzzle.notes) },
+            isWinningResult = { result -> result.all { it == TileState.Correct } }
+        )
+    }
+
+    fun submitExtraGuess(edo: Int) {
+        submitGuessWithResult(
+            itemName = "音",
+            resultForGuess = { guess -> evaluateExtraGuess(guess, puzzle.notes, edo) },
+            isWinningResult = { result -> result.all { it == TileState.Correct } }
+        )
+    }
+
+    private fun submitGuessWithResult(
+        itemName: String,
+        resultForGuess: (List<Int>) -> List<TileState>,
+        isWinningResult: (List<TileState>) -> Boolean
+    ) {
         if (status != GameStatus.Playing) {
             return
         }
@@ -170,12 +223,12 @@ class ChordleGame(
             message = "请先确认全部 ${columns} 个$itemName"
             return
         }
-        val result = evaluateGuess(guess, puzzle.notes)
+        val result = resultForGuess(guess)
         result.forEachIndexed { column, state ->
             setCell(currentRow, column, GuessCell(guess[column], state))
         }
 
-        if (result.all { it == TileState.Correct }) {
+        if (isWinningResult(result)) {
             status = GameStatus.Won
             message = "答对了：$answerText"
             return
@@ -216,6 +269,22 @@ class ChordleGame(
 
     fun rowIsFull(row: Int): Boolean {
         return rowNotes(row).size == columns
+    }
+
+    fun cellIsJudged(row: Int, column: Int): Boolean {
+        return when (cell(row, column).state) {
+            TileState.Correct,
+            TileState.ExtraCorrect,
+            TileState.Present,
+            TileState.ExtraNear,
+            TileState.Absent -> true
+            TileState.Empty,
+            TileState.Input -> false
+        }
+    }
+
+    fun rowIsJudged(row: Int): Boolean {
+        return (0 until columns).all { column -> cellIsJudged(row, column) }
     }
 
     fun rowNotes(row: Int): List<Int> {
@@ -261,6 +330,30 @@ fun evaluateGuess(guess: List<Int>, answer: List<Int>): List<TileState> {
     return result
 }
 
+fun evaluateExtraGuess(guess: List<Int>, answer: List<Int>, edo: Int): List<TileState> {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    return guess.mapIndexed { index, note ->
+        val answerAtPosition = answer.getOrNull(index)
+        when {
+            answerAtPosition != null && note == answerAtPosition -> {
+                TileState.Correct
+            }
+            answerAtPosition != null && extraStepCentsDistance(note, answerAtPosition, normalizedEdo) <= ExtraPitchToleranceCents -> {
+                TileState.ExtraCorrect
+            }
+            answer.any { answerNote -> extraStepCentsDistance(note, answerNote, normalizedEdo) <= ExtraPitchToleranceCents } -> {
+                TileState.ExtraNear
+            }
+            else -> TileState.Absent
+        }
+    }
+}
+
+fun extraStepCentsDistance(firstStep: Int, secondStep: Int, edo: Int): Double {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    return abs(firstStep - secondStep) * 1200.0 / normalizedEdo
+}
+
 fun noteLabel(midiNote: Int): String {
     val pitch = pitchNames[midiNote.floorMod(12)]
     val octave = midiNote / 12 - 1
@@ -284,6 +377,31 @@ fun sanitizePlayableRange(range: IntRange): IntRange {
 
 fun sanitizeChordToneCount(noteCount: Int): Int {
     return noteCount.coerceIn(MinChordToneCount, MaxChordToneCount)
+}
+
+fun sanitizeExtraEdo(edo: Int): Int {
+    return edo.coerceIn(MinExtraEdo, MaxExtraEdo)
+}
+
+fun sanitizeExtraPlayableRange(range: IntRange): IntRange {
+    val playableRange = sanitizePlayableRange(range)
+    var low = nextCAtOrAbove(playableRange.first)
+        .coerceIn(LowestExtraPlayableMidiNote, HighestExtraPlayableMidiNote - MinimumPlayableRangeSemitones)
+    var high = previousCAtOrBelow(playableRange.last)
+        .coerceIn(LowestExtraPlayableMidiNote + MinimumPlayableRangeSemitones, HighestExtraPlayableMidiNote)
+    if (high - low < MinimumPlayableRangeSemitones) {
+        high = (low + MinimumPlayableRangeSemitones).coerceAtMost(HighestExtraPlayableMidiNote)
+        low = (high - MinimumPlayableRangeSemitones).coerceAtLeast(LowestExtraPlayableMidiNote)
+    }
+    return low..high
+}
+
+fun cMidiNoteForOctave(octave: Int): Int {
+    return ((octave + 1) * 12).coerceIn(LowestExtraPlayableMidiNote, HighestExtraPlayableMidiNote)
+}
+
+fun octaveForCMidiNote(midiNote: Int): Int {
+    return midiNote / 12 - 1
 }
 
 fun sanitizeMidiProgramNumber(program: Int): Int {
@@ -323,6 +441,46 @@ fun midiNoteFrequency(midiNote: Int): Double {
     return 440.0 * 2.0.pow((midiNote - 69) / 12.0)
 }
 
+fun extraStepRangeForMidiRange(edo: Int, noteRange: IntRange): IntRange {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    val playableRange = sanitizeExtraPlayableRange(noteRange)
+    val low = ceil(playableRange.first * normalizedEdo / 12.0 - 0.000001).toInt()
+    val high = floor(playableRange.last * normalizedEdo / 12.0 + 0.000001).toInt()
+    return if (high >= low) low..high else low..low
+}
+
+fun midiValueForExtraStep(step: Int, edo: Int): Double {
+    return step * 12.0 / sanitizeExtraEdo(edo)
+}
+
+fun extraStepLabel(step: Int, edo: Int): String {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    val octave = step / normalizedEdo - 1
+    val octaveStep = step.floorMod(normalizedEdo)
+    return if (octaveStep == 0) {
+        "C$octave"
+    } else {
+        "C$octave+$octaveStep"
+    }
+}
+
+fun extraStepTileLabel(step: Int, edo: Int): String {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    val octave = step / normalizedEdo - 1
+    val octaveStep = step.floorMod(normalizedEdo)
+    return if (octaveStep == 0) {
+        "C$octave"
+    } else {
+        "C$octave\n+$octaveStep\\$normalizedEdo"
+    }
+}
+
+fun extraRangeLabel(edo: Int, noteRange: IntRange): String {
+    val stepRange = extraStepRangeForMidiRange(edo, noteRange)
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    return "${extraStepLabel(stepRange.first, normalizedEdo)}-${extraStepLabel(stepRange.last, normalizedEdo)}"
+}
+
 fun randomOvertoneBaseMidiNote(
     multiplierRange: IntRange,
     random: Random = Random.Default
@@ -359,6 +517,14 @@ fun isBlackKey(midiNote: Int): Boolean {
         1, 3, 6, 8, 10 -> true
         else -> false
     }
+}
+
+private fun nextCAtOrAbove(midiNote: Int): Int {
+    return midiNote + (12 - midiNote.floorMod(12)).floorMod(12)
+}
+
+private fun previousCAtOrBelow(midiNote: Int): Int {
+    return midiNote - midiNote.floorMod(12)
 }
 
 private fun Int.floorMod(other: Int): Int {

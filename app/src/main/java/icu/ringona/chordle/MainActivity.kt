@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -83,7 +84,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.floor
 import kotlin.math.ln
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -226,6 +229,7 @@ private fun ChordleGameScreen(
     val settings = remember { ChordleSettings(context) }
     var playableRange by remember { mutableStateOf(settings.loadPlayableRange()) }
     var chordToneCount by remember { mutableStateOf(settings.loadChordToneCount()) }
+    var extraEdo by remember { mutableStateOf(settings.loadExtraEdo()) }
     var overtoneRange by remember { mutableStateOf(settings.loadOvertoneRange()) }
     var overtoneToneCount by remember { mutableStateOf(settings.loadOvertoneToneCount()) }
     var instrumentProgram by remember { mutableStateOf(settings.loadInstrumentProgram()) }
@@ -234,8 +238,8 @@ private fun ChordleGameScreen(
         ChordleGame(
             when (mode) {
                 ChordleMode.Overtones -> ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange)
-                ChordleMode.Normal,
-                ChordleMode.Extra -> ChordPuzzle.random(chordToneCount, playableRange)
+                ChordleMode.Extra -> ChordPuzzle.randomExtra(chordToneCount, playableRange, extraEdo)
+                ChordleMode.Normal -> ChordPuzzle.random(chordToneCount, playableRange)
             }
         )
     }
@@ -244,8 +248,8 @@ private fun ChordleGameScreen(
     var audioStatus by remember { mutableStateOf<AudioStatus>(AudioStatus.Loading) }
     val statusDetail = when (mode) {
         ChordleMode.Overtones -> "${game.columns} 音 · ${overtoneRangeLabel(overtoneRange)}"
-        ChordleMode.Normal,
-        ChordleMode.Extra -> "${game.columns} 音 · ${rangeLabel(playableRange)}"
+        ChordleMode.Extra -> "${game.columns} 音 · ${extraEdo}EDO · ${extraRangeLabel(extraEdo, playableRange)}"
+        ChordleMode.Normal -> "${game.columns} 音 · ${rangeLabel(playableRange)}"
     }
 
     BackHandler(enabled = !showHelp && !showSettings) {
@@ -313,15 +317,17 @@ private fun ChordleGameScreen(
                         ChordleMode.Overtones -> {
                             game.newPuzzle(ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange))
                         }
-                        ChordleMode.Normal,
                         ChordleMode.Extra -> {
+                            game.newPuzzle(ChordPuzzle.randomExtra(chordToneCount, playableRange, extraEdo))
+                        }
+                        ChordleMode.Normal -> {
                             game.newPuzzle(chordToneCount, playableRange)
                         }
                     }
                     if (audioStatus == AudioStatus.Ready) {
                         scope.launch {
                             playTones(
-                                playbackTonesForMode(mode, game.puzzle, game.puzzle.notes),
+                                playbackTonesForMode(mode, game.puzzle, game.puzzle.notes, extraEdo),
                                 program = instrumentProgram,
                                 durationMillis = 1400
                             )
@@ -333,10 +339,11 @@ private fun ChordleGameScreen(
             BoardArea(
                 game = game,
                 audioReady = audioStatus == AudioStatus.Ready,
+                requireJudgedPlayback = !keyPitchPreviewEnabled,
                 onPlayRow = { row ->
                     scope.launch {
                         playTones(
-                            playbackTonesForMode(mode, game.puzzle, game.rowNotes(row)),
+                            playbackTonesForMode(mode, game.puzzle, game.rowNotes(row), extraEdo),
                             program = instrumentProgram,
                             durationMillis = 1200
                         )
@@ -345,14 +352,14 @@ private fun ChordleGameScreen(
                 onPlayValue = { value ->
                     scope.launch {
                         playTones(
-                            playbackTonesForMode(mode, game.puzzle, listOf(value)),
+                            playbackTonesForMode(mode, game.puzzle, listOf(value), extraEdo),
                             velocity = 92,
                             program = instrumentProgram,
                             durationMillis = 520
                         )
                     }
                 },
-                valueLabel = valueLabelForMode(mode),
+                valueLabel = valueLabelForMode(mode, extraEdo),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -367,7 +374,7 @@ private fun ChordleGameScreen(
                         if (audioStatus == AudioStatus.Ready) {
                             scope.launch {
                                 playTones(
-                                    playbackTonesForMode(mode, game.puzzle, game.puzzle.notes),
+                                    playbackTonesForMode(mode, game.puzzle, game.puzzle.notes, extraEdo),
                                     program = instrumentProgram,
                                     durationMillis = 1600
                                 )
@@ -391,29 +398,65 @@ private fun ChordleGameScreen(
                     }
                 )
             } else {
+                val isExtraMode = mode == ChordleMode.Extra
                 InputPanel(
                     game = game,
                     audioReady = audioStatus == AudioStatus.Ready,
                     onPlayChord = {
                         if (audioStatus == AudioStatus.Ready) {
                             scope.launch {
-                                playNotes(game.puzzle.notes, program = instrumentProgram, durationMillis = 1600)
+                                playTones(
+                                    playbackTonesForMode(mode, game.puzzle, game.puzzle.notes, extraEdo),
+                                    program = instrumentProgram,
+                                    durationMillis = 1600
+                                )
                             }
                         } else {
                             game.clearMessage()
                         }
                     },
-                    onPreviewNote = { note ->
-                        game.selectNote(note)
+                    onPreviewValue = { value ->
+                        game.selectNote(value)
                         if (keyPitchPreviewEnabled && audioStatus == AudioStatus.Ready) {
                             scope.launch {
-                                playNotes(
-                                    listOf(note),
+                                playTones(
+                                    playbackTonesForMode(mode, game.puzzle, listOf(value), extraEdo),
                                     velocity = 92,
                                     program = instrumentProgram,
                                     durationMillis = 520
                                 )
                             }
+                        }
+                    },
+                    selectionLabel = if (isExtraMode) {
+                        { value -> extraStepLabel(value, extraEdo) }
+                    } else {
+                        ::noteLabel
+                    },
+                    emptySelectionText = if (isExtraMode) "未选 EDO 音" else "未选音",
+                    missingSelectionMessage = if (isExtraMode) "先在 EDO 标尺上选择一个音" else "先在钢琴上选择一个音",
+                    onSubmit = {
+                        if (isExtraMode) {
+                            game.submitExtraGuess(extraEdo)
+                        } else {
+                            game.submitGuess()
+                        }
+                    },
+                    keyboardContent = { selectedValue, onValuePressed ->
+                        if (isExtraMode) {
+                            MicrotonalKeyboard(
+                                edo = extraEdo,
+                                noteRange = playableRange,
+                                selectedStep = selectedValue,
+                                onStepPressed = onValuePressed,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            PianoKeyboard(
+                                selectedNote = selectedValue,
+                                onNotePressed = onValuePressed,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 )
@@ -472,6 +515,46 @@ private fun ChordleGameScreen(
                         scope.launch {
                             playTones(
                                 playbackTonesForMode(mode, game.puzzle, game.puzzle.notes),
+                                program = instrumentProgram,
+                                durationMillis = 1400
+                            )
+                        }
+                    }
+                }
+            )
+        } else if (mode == ChordleMode.Extra) {
+            ExtraSettingsDialog(
+                range = playableRange,
+                chordToneCount = chordToneCount,
+                extraEdo = extraEdo,
+                instrumentProgram = instrumentProgram,
+                keyPitchPreviewEnabled = keyPitchPreviewEnabled,
+                onDismiss = { showSettings = false },
+                onSave = { range, toneCount, edo, program, previewEnabled ->
+                    val nextRange = sanitizeExtraPlayableRange(range)
+                    val nextToneCount = sanitizeChordToneCount(toneCount)
+                    val nextEdo = sanitizeExtraEdo(edo)
+                    val nextProgram = sanitizeMidiProgramNumber(program)
+                    val shouldCreateNewPuzzle =
+                        nextRange != playableRange || nextToneCount != chordToneCount || nextEdo != extraEdo
+                    playableRange = nextRange
+                    chordToneCount = nextToneCount
+                    extraEdo = nextEdo
+                    instrumentProgram = nextProgram
+                    keyPitchPreviewEnabled = previewEnabled
+                    settings.savePlayableRange(playableRange)
+                    settings.saveChordToneCount(chordToneCount)
+                    settings.saveExtraEdo(extraEdo)
+                    settings.saveInstrumentProgram(instrumentProgram)
+                    settings.saveKeyPitchPreviewEnabled(keyPitchPreviewEnabled)
+                    if (shouldCreateNewPuzzle) {
+                        game.newPuzzle(ChordPuzzle.randomExtra(chordToneCount, playableRange, extraEdo))
+                    }
+                    showSettings = false
+                    if (audioStatus == AudioStatus.Ready) {
+                        scope.launch {
+                            playTones(
+                                playbackTonesForMode(mode, game.puzzle, game.puzzle.notes, extraEdo),
                                 program = instrumentProgram,
                                 durationMillis = 1400
                             )
@@ -641,6 +724,7 @@ private fun GameStatusLine(
 private fun BoardArea(
     game: ChordleGame,
     audioReady: Boolean,
+    requireJudgedPlayback: Boolean,
     onPlayRow: (Int) -> Unit,
     onPlayValue: (Int) -> Unit,
     valueLabel: (Int) -> String,
@@ -670,28 +754,35 @@ private fun BoardArea(
                         .height(tileSize),
                     contentAlignment = Alignment.Center
                 ) {
+                    val rowNotes = game.rowNotes(row)
+                    val canPlayRow = audioReady &&
+                        rowNotes.isNotEmpty() &&
+                        (!requireJudgedPlayback || game.rowIsJudged(row))
                     Row(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalArrangement = Arrangement.spacedBy(gap),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         repeat(game.columns) { column ->
+                            val cell = game.cell(row, column)
+                            val canPlayCell = audioReady &&
+                                (!requireJudgedPlayback || game.cellIsJudged(row, column))
                             ChordTile(
-                                cell = game.cell(row, column),
+                                cell = cell,
                                 active = game.status == GameStatus.Playing &&
                                     row == game.currentRow &&
                                     column == game.currentColumn,
                                 size = tileSize,
                                 valueLabel = valueLabel,
-                                onClick = game.cell(row, column).note
-                                    ?.takeIf { audioReady }
+                                onClick = cell.note
+                                    ?.takeIf { canPlayCell }
                                     ?.let { value -> { onPlayValue(value) } }
                             )
                         }
                     }
                     TextButton(
                         onClick = { onPlayRow(row) },
-                        enabled = audioReady && game.rowNotes(row).isNotEmpty(),
+                        enabled = canPlayRow,
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .size(34.dp),
@@ -699,7 +790,7 @@ private fun BoardArea(
                     ) {
                         Text(
                             text = "▶",
-                            color = if (audioReady && game.rowNotes(row).isNotEmpty()) ChordleMuted else WordleBorder,
+                            color = if (canPlayRow) ChordleMuted else WordleBorder,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -720,7 +811,9 @@ private fun ChordTile(
 ) {
     val background = when (cell.state) {
         TileState.Correct -> ChordleGreen
+        TileState.ExtraCorrect -> ExtraCorrectBlue
         TileState.Present -> ChordleYellow
+        TileState.ExtraNear -> ExtraNearPink
         TileState.Absent -> ChordleGray
         else -> ChordleBackground
     }
@@ -739,13 +832,16 @@ private fun ChordTile(
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
+        val label = cell.note?.let(valueLabel).orEmpty()
+        val multiline = label.contains('\n')
         Text(
-            text = cell.note?.let(valueLabel).orEmpty(),
+            text = label,
             color = Color.White,
-            fontSize = 18.sp,
+            fontSize = if (multiline) 13.sp else 18.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
-            maxLines = 1,
+            lineHeight = if (multiline) 16.sp else 20.sp,
+            maxLines = if (multiline) 2 else 1,
             overflow = TextOverflow.Clip
         )
     }
@@ -756,7 +852,20 @@ private fun InputPanel(
     game: ChordleGame,
     audioReady: Boolean,
     onPlayChord: () -> Unit,
-    onPreviewNote: (Int) -> Unit
+    onPreviewValue: (Int) -> Unit,
+    selectionLabel: (Int) -> String = ::noteLabel,
+    emptySelectionText: String = "未选音",
+    confirmButtonText: String = "确认此音",
+    missingSelectionMessage: String = "先在钢琴上选择一个音",
+    submitItemName: String = "音",
+    onSubmit: () -> Unit = { game.submitGuess(submitItemName) },
+    keyboardContent: @Composable (Int?, (Int) -> Unit) -> Unit = { selectedValue, onValuePressed ->
+        PianoKeyboard(
+            selectedNote = selectedValue,
+            onNotePressed = onValuePressed,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 ) {
     Column(
         modifier = Modifier
@@ -784,7 +893,7 @@ private fun InputPanel(
                 shape = RoundedCornerShape(6.dp)
             ) {
                 Text(
-                    text = game.selectedNote?.let { "选中 ${noteLabel(it)}" } ?: "未选音",
+                    text = game.selectedNote?.let { "选中 ${selectionLabel(it)}" } ?: emptySelectionText,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
                     color = ChordleText,
                     textAlign = TextAlign.Center,
@@ -800,11 +909,15 @@ private fun InputPanel(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
-                onClick = { game.confirmSelectedNote() },
+                onClick = {
+                    game.confirmSelectedValue(
+                        missingSelectionMessage = missingSelectionMessage
+                    )
+                },
                 enabled = game.status == GameStatus.Playing,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("确认此音", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(confirmButtonText, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             OutlinedButton(
                 onClick = { game.deleteLast() },
@@ -814,7 +927,7 @@ private fun InputPanel(
                 Text("删除", maxLines = 1)
             }
             Button(
-                onClick = { game.submitGuess() },
+                onClick = onSubmit,
                 enabled = game.status == GameStatus.Playing && game.rowIsFull(game.currentRow),
                 modifier = Modifier.weight(0.85f),
                 colors = ButtonDefaults.buttonColors(containerColor = ChordleGray)
@@ -835,11 +948,7 @@ private fun InputPanel(
             )
         }
 
-        PianoKeyboard(
-            selectedNote = game.selectedNote,
-            onNotePressed = onPreviewNote,
-            modifier = Modifier.fillMaxWidth()
-        )
+        keyboardContent(game.selectedNote, onPreviewValue)
     }
 }
 
@@ -1104,6 +1213,192 @@ private fun PianoKeyboard(
 }
 
 @Composable
+private fun MicrotonalKeyboard(
+    edo: Int,
+    noteRange: IntRange,
+    selectedStep: Int?,
+    onStepPressed: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    val touchStepRange = remember(normalizedEdo, noteRange) {
+        extraStepRangeForMidiRange(normalizedEdo, noteRange)
+    }
+    val rulerStepRange = remember(normalizedEdo, touchStepRange) {
+        expandedMicrotonalRulerStepRange(touchStepRange, normalizedEdo)
+    }
+    val labelPaint = remember {
+        AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            textAlign = AndroidPaint.Align.CENTER
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+    }
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .height(172.dp)
+            .background(ChordleBackground)
+    ) {
+        val viewportWidthPx = with(density) { maxWidth.toPx() }
+        val baseStepWidthPx = with(density) { 18.dp.toPx() }
+        val stepWidthPx = baseStepWidthPx * scale
+        val stepCount = rulerStepRange.last - rulerStepRange.first + 1
+        val contentWidthPx = stepCount * stepWidthPx
+        val minOffset = min(0f, viewportWidthPx - contentWidthPx)
+
+        LaunchedEffect(minOffset, contentWidthPx, selectedStep) {
+            offsetX = offsetX.coerceIn(minOffset, 0f)
+        }
+
+        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+            val nextScale = (scale * zoomChange).coerceIn(0.64f, 3.6f)
+            val nextStepWidth = baseStepWidthPx * nextScale
+            val nextContentWidth = stepCount * nextStepWidth
+            val nextMinOffset = min(0f, viewportWidthPx - nextContentWidth)
+            scale = nextScale
+            offsetX = (offsetX + panChange.x).coerceIn(nextMinOffset, 0f)
+        }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .clipToBounds()
+                .background(Color(0xFF090B0F))
+                .pointerInput(normalizedEdo, rulerStepRange, touchStepRange, scale, offsetX, viewportWidthPx) {
+                    detectTapGestures { position ->
+                        findMicrotonalStep(
+                            x = position.x,
+                            offsetX = offsetX,
+                            stepWidth = stepWidthPx,
+                            rulerStepRange = rulerStepRange,
+                            touchStepRange = touchStepRange
+                        )?.let(onStepPressed)
+                    }
+                }
+                .transformable(transformState)
+        ) {
+            val corner = CornerRadius(7.dp.toPx(), 7.dp.toPx())
+            val panelInset = 2.dp.toPx()
+            val panelTopLeft = Offset(panelInset, panelInset)
+            val panelSize = Size(size.width - panelInset * 2f, size.height - panelInset * 2f)
+            val pitchStep = 12.0 / normalizedEdo
+            val minPitchSpacing = MicrotonalKeyboardMinTickSpacingPx * pitchStep / stepWidthPx
+
+            drawRoundRect(
+                brush = Brush.verticalGradient(
+                    listOf(
+                        Color(0x6028323F),
+                        Color(0xD0080A0F),
+                        Color(0xF006070A)
+                    )
+                ),
+                topLeft = panelTopLeft,
+                size = panelSize,
+                cornerRadius = corner
+            )
+            drawRoundRect(
+                brush = Brush.verticalGradient(
+                    listOf(
+                        Color(0x22FFFFFF),
+                        Color.Transparent,
+                        Color(0x30000000)
+                    )
+                ),
+                topLeft = panelTopLeft,
+                size = panelSize,
+                cornerRadius = corner
+            )
+
+            withTransform({ translate(left = offsetX) }) {
+                selectedStep?.takeIf { it in touchStepRange }?.let { step ->
+                    val x = (step - rulerStepRange.first) * stepWidthPx
+                    drawRoundRect(
+                        color = ChordleGreen.copy(alpha = 0.28f),
+                        topLeft = Offset(x + 1.dp.toPx(), panelInset),
+                        size = Size(max(2f, stepWidthPx - 2.dp.toPx()), size.height - panelInset * 2f),
+                        cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx())
+                    )
+                }
+
+                for (step in rulerStepRange) {
+                    val x = (step - rulerStepRange.first) * stepWidthPx + stepWidthPx / 2f
+                    if (x + offsetX < -2f || x + offsetX > size.width + 2f) {
+                        continue
+                    }
+                    val octaveStep = positiveModulo(step, normalizedEdo)
+                    val marker = edoMarkerForStep(normalizedEdo, octaveStep)
+                    val baseRatio = ExtraEdoMarkRatios[marker] ?: 0f
+                    if (baseRatio <= 0f) {
+                        continue
+                    }
+                    val isC = octaveStep == 0
+                    val visibilityRatio = denseLineVisibilityRatio(
+                        stepIndex = step,
+                        step = pitchStep,
+                        minPitchSpacing = minPitchSpacing,
+                        isAnchor = isC
+                    )
+                    val ratio = (baseRatio * visibilityRatio).coerceIn(0f, 1f)
+                    if (ratio <= 0f) {
+                        continue
+                    }
+                    val tickLength = size.height * MicrotonalCTickHeightRatio * ratio
+                    val alpha = (MicrotonalCTickAlpha * ratio).roundToInt().coerceIn(0, MicrotonalCTickAlpha)
+                    val strokeWidth = if (isC) 1.4.dp.toPx() else 1.dp.toPx()
+                    drawLine(
+                        color = xenRulerHighlight(alpha),
+                        start = Offset(x, panelInset),
+                        end = Offset(x, panelInset + tickLength),
+                        strokeWidth = strokeWidth
+                    )
+                    if (isC) {
+                        val octaveLabel = "C${step / normalizedEdo - 1}"
+                        drawIntoCanvas { canvas ->
+                            labelPaint.color = android.graphics.Color.argb(184, 255, 222, 111)
+                            labelPaint.textSize = 10.sp.toPx()
+                            canvas.nativeCanvas.drawText(
+                                octaveLabel,
+                                x,
+                                size.height - 8.dp.toPx(),
+                                labelPaint
+                            )
+                        }
+                    } else if (marker == SecondaryExtraEdoMark) {
+                        drawIntoCanvas { canvas ->
+                            labelPaint.color = android.graphics.Color.argb(144, 255, 222, 111)
+                            labelPaint.textSize = 8.sp.toPx()
+                            canvas.nativeCanvas.drawText(
+                                octaveStep.toString(),
+                                x,
+                                (panelInset + tickLength + 10.dp.toPx()).coerceAtMost(size.height - 24.dp.toPx()),
+                                labelPaint
+                            )
+                        }
+                    }
+                }
+            }
+
+            drawLine(
+                color = Color.White.copy(alpha = 0.18f),
+                start = Offset(panelInset, panelInset),
+                end = Offset(size.width - panelInset, panelInset),
+                strokeWidth = 1f
+            )
+            drawLine(
+                color = xenRulerHighlight(168),
+                start = Offset(panelInset, size.height - panelInset),
+                end = Offset(size.width - panelInset, size.height - panelInset),
+                strokeWidth = 1f
+            )
+        }
+    }
+}
+
+@Composable
 private fun HelpDialog(
     mode: ChordleMode,
     onDismiss: () -> Unit
@@ -1193,24 +1488,36 @@ private data class PlaybackTone(
     val cents: Float = 0f
 )
 
-private fun valueLabelForMode(mode: ChordleMode): (Int) -> String {
+private fun valueLabelForMode(mode: ChordleMode, extraEdo: Int = DefaultExtraEdo): (Int) -> String {
     return when (mode) {
         ChordleMode.Overtones -> { value -> value.toString() }
-        ChordleMode.Normal,
-        ChordleMode.Extra -> ::noteLabel
+        ChordleMode.Extra -> { value -> extraStepTileLabel(value, extraEdo) }
+        ChordleMode.Normal -> ::noteLabel
     }
 }
 
 private fun playbackTonesForMode(
     mode: ChordleMode,
     puzzle: ChordPuzzle,
-    values: List<Int>
+    values: List<Int>,
+    extraEdo: Int = DefaultExtraEdo
 ): List<PlaybackTone> {
     return when (mode) {
         ChordleMode.Overtones -> overtonePlaybackTones(puzzle, values)
-        ChordleMode.Normal,
-        ChordleMode.Extra -> values.map { PlaybackTone(key = it) }
+        ChordleMode.Extra -> extraPlaybackTones(values, extraEdo)
+        ChordleMode.Normal -> values.map { PlaybackTone(key = it) }
     }
+}
+
+private fun extraPlaybackTones(steps: List<Int>, edo: Int): List<PlaybackTone> {
+    return steps.map { step -> extraPlaybackTone(step, edo) }
+}
+
+private fun extraPlaybackTone(step: Int, edo: Int): PlaybackTone {
+    val midiValue = midiValueForExtraStep(step, edo)
+    val key = round(midiValue).toInt().coerceIn(0, HighestPlayableMidiNote)
+    val cents = ((midiValue - key) * 100.0).toFloat()
+    return PlaybackTone(key = key, cents = cents)
 }
 
 private fun overtonePlaybackTones(puzzle: ChordPuzzle, multipliers: List<Int>): List<PlaybackTone> {
@@ -1297,6 +1604,16 @@ private class ChordleSettings(context: android.content.Context) {
             .apply()
     }
 
+    fun loadExtraEdo(): Int {
+        return sanitizeExtraEdo(preferences.getInt(KEY_EXTRA_EDO, DefaultExtraEdo))
+    }
+
+    fun saveExtraEdo(edo: Int) {
+        preferences.edit()
+            .putInt(KEY_EXTRA_EDO, sanitizeExtraEdo(edo))
+            .apply()
+    }
+
     fun loadOvertoneRange(): IntRange {
         val low = preferences.getInt(KEY_OVERTONE_LOW, DefaultOvertoneRange.first)
         val high = preferences.getInt(KEY_OVERTONE_HIGH, DefaultOvertoneRange.last)
@@ -1348,6 +1665,7 @@ private class ChordleSettings(context: android.content.Context) {
         const val KEY_LOW = "playable_range_low"
         const val KEY_HIGH = "playable_range_high"
         const val KEY_TONE_COUNT = "chord_tone_count"
+        const val KEY_EXTRA_EDO = "extra_edo"
         const val KEY_OVERTONE_LOW = "overtone_range_low"
         const val KEY_OVERTONE_HIGH = "overtone_range_high"
         const val KEY_OVERTONE_TONE_COUNT = "overtone_tone_count"
@@ -1483,6 +1801,175 @@ private fun RangeSettingsDialog(
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("全键盘")
+                    }
+                }
+            }
+        },
+        containerColor = Color(0xFFF8F0F8),
+        titleContentColor = Color(0xFF4E4156),
+        textContentColor = Color(0xFF4E4156)
+    )
+}
+
+@Composable
+private fun ExtraSettingsDialog(
+    range: IntRange,
+    chordToneCount: Int,
+    extraEdo: Int,
+    instrumentProgram: Int,
+    keyPitchPreviewEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (IntRange, Int, Int, Int, Boolean) -> Unit
+) {
+    val initialRange = sanitizeExtraPlayableRange(range)
+    var low by remember(initialRange) { mutableFloatStateOf(initialRange.first.toFloat()) }
+    var high by remember(initialRange) { mutableFloatStateOf(initialRange.last.toFloat()) }
+    var toneCount by remember(chordToneCount) { mutableFloatStateOf(chordToneCount.toFloat()) }
+    var edo by remember(extraEdo) { mutableFloatStateOf(sanitizeExtraEdo(extraEdo).toFloat()) }
+    var program by remember(instrumentProgram) {
+        mutableFloatStateOf(sanitizeMidiProgramNumber(instrumentProgram).toFloat())
+    }
+    var previewEnabled by remember(keyPitchPreviewEnabled) { mutableStateOf(keyPitchPreviewEnabled) }
+
+    fun currentRange(): IntRange {
+        return sanitizeExtraPlayableRange(low.toInt()..high.toInt())
+    }
+
+    fun currentEdo(): Int {
+        return sanitizeExtraEdo(edo.roundToInt())
+    }
+
+    fun setEdo(value: Int) {
+        edo = sanitizeExtraEdo(value).toFloat()
+    }
+
+    fun currentProgram(): Int {
+        return sanitizeMidiProgramNumber(program.toInt())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(currentRange(), toneCount.toInt(), currentEdo(), currentProgram(), previewEnabled)
+                }
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+        title = { Text("Extra 设置") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                val sanitized = currentRange()
+                val sanitizedEdo = currentEdo()
+                Text("EDO：${sanitizedEdo}EDO", fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = { setEdo(sanitizedEdo - 1) },
+                        enabled = sanitizedEdo > MinExtraEdo,
+                        modifier = Modifier.width(52.dp),
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                    ) {
+                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Slider(
+                        value = sanitizedEdo.toFloat(),
+                        onValueChange = { value ->
+                            setEdo(value.roundToInt())
+                        },
+                        modifier = Modifier.weight(1f),
+                        valueRange = MinExtraEdo.toFloat()..MaxExtraEdo.toFloat(),
+                        steps = MaxExtraEdo - MinExtraEdo - 1
+                    )
+                    OutlinedButton(
+                        onClick = { setEdo(sanitizedEdo + 1) },
+                        enabled = sanitizedEdo < MaxExtraEdo,
+                        modifier = Modifier.width(52.dp),
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                    ) {
+                        Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Text("出题音域：${rangeLabel(sanitized)} · ${extraRangeLabel(sanitizedEdo, sanitized)}")
+                Text(
+                    text = "Extra 会按当前 EDO 把八度等分；音域两端只允许选择 C，并使用 XenSynth 的 1-72 EDO 标尺模板绘制键盘刻度。",
+                    fontSize = 14.sp,
+                    color = Color(0xFF6E5D75)
+                )
+                Text("播放音数：${sanitizeChordToneCount(toneCount.toInt())}", fontWeight = FontWeight.Bold)
+                Slider(
+                    value = toneCount,
+                    onValueChange = { value ->
+                        toneCount = sanitizeChordToneCount(value.toInt()).toFloat()
+                    },
+                    valueRange = MinChordToneCount.toFloat()..MaxChordToneCount.toFloat(),
+                    steps = MaxChordToneCount - MinChordToneCount - 1
+                )
+                Text("音色（MIDI program number）：${currentProgram()}", fontWeight = FontWeight.Bold)
+                Slider(
+                    value = program,
+                    onValueChange = { value ->
+                        program = sanitizeMidiProgramNumber(value.toInt()).toFloat()
+                    },
+                    valueRange = MinMidiProgramNumber.toFloat()..MaxMidiProgramNumber.toFloat(),
+                    steps = MaxMidiProgramNumber - MinMidiProgramNumber - 1
+                )
+                SettingSwitchRow(
+                    text = "选择按键时预听音高",
+                    checked = previewEnabled,
+                    onCheckedChange = { previewEnabled = it }
+                )
+                Text(
+                    "音域两端：${noteLabel(sanitized.first)} / ${noteLabel(sanitized.last)}",
+                    fontWeight = FontWeight.Bold
+                )
+                DiscreteIntRangeSlider(
+                    value = octaveForCMidiNote(sanitized.first)..octaveForCMidiNote(sanitized.last),
+                    onValueChange = { value ->
+                        val nextRange = sanitizeExtraPlayableRange(
+                            cMidiNoteForOctave(value.first)..cMidiNoteForOctave(value.last)
+                        )
+                        low = nextRange.first.toFloat()
+                        high = nextRange.last.toFloat()
+                    },
+                    valueRange = MinExtraRangeOctave..MaxExtraRangeOctave,
+                    steps = MaxExtraRangeOctave - MinExtraRangeOctave - 1
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            low = DefaultPlayableRange.first.toFloat()
+                            high = DefaultPlayableRange.last.toFloat()
+                            toneCount = DefaultChordToneCount.toFloat()
+                            edo = DefaultExtraEdo.toFloat()
+                            program = DefaultMidiProgramNumber.toFloat()
+                            previewEnabled = DefaultKeyPitchPreviewEnabled
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("默认")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            low = LowestExtraPlayableMidiNote.toFloat()
+                            high = HighestExtraPlayableMidiNote.toFloat()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("全C范围")
                     }
                 }
             }
@@ -1654,8 +2141,90 @@ private fun SettingSwitchRow(
     }
 }
 
+private fun findMicrotonalStep(
+    x: Float,
+    offsetX: Float,
+    stepWidth: Float,
+    rulerStepRange: IntRange,
+    touchStepRange: IntRange
+): Int? {
+    val localX = x - offsetX
+    if (localX < 0f || stepWidth <= 0f) {
+        return null
+    }
+    val step = rulerStepRange.first + floor(localX / stepWidth).toInt()
+    return step.takeIf { it in touchStepRange }
+}
+
+private fun expandedMicrotonalRulerStepRange(stepRange: IntRange, edo: Int): IntRange {
+    val edgePaddingSteps = kotlin.math.ceil(sanitizeExtraEdo(edo) / 12.0).toInt().coerceAtLeast(1)
+    return (stepRange.first - edgePaddingSteps)..(stepRange.last + edgePaddingSteps)
+}
+
+private fun edoMarkerForStep(edo: Int, octaveStep: Int): Char {
+    val pattern = ExtraEdoScaleMarks[sanitizeExtraEdo(edo)].orEmpty()
+    if (pattern.isEmpty()) {
+        return HiddenExtraEdoMark
+    }
+    return pattern.getOrNull(octaveStep) ?: HiddenExtraEdoMark
+}
+
+private fun denseLineVisibilityRatio(
+    stepIndex: Int,
+    step: Double,
+    minPitchSpacing: Double,
+    isAnchor: Boolean = false
+): Float {
+    if (isAnchor) {
+        return 1f
+    }
+    if (step <= DenseLineStepEpsilon || minPitchSpacing <= DenseLineStepEpsilon) {
+        return 1f
+    }
+    val desiredStride = minPitchSpacing / step
+    if (!desiredStride.isFinite() || desiredStride <= 1.0) {
+        return 1f
+    }
+
+    val fineStride = floor(desiredStride).toInt().coerceAtLeast(1)
+    val coarseStride = kotlin.math.ceil(desiredStride).toInt().coerceAtLeast(1)
+    if (fineStride == coarseStride) {
+        return if (positiveModulo(stepIndex, coarseStride) == 0) 1f else 0f
+    }
+
+    val fineWeight = smoothStep((coarseStride - desiredStride).coerceIn(0.0, 1.0)).toFloat()
+    val coarseWeight = 1f - fineWeight
+    var ratio = 0f
+    if (positiveModulo(stepIndex, fineStride) == 0) {
+        ratio = max(ratio, fineWeight)
+    }
+    if (positiveModulo(stepIndex, coarseStride) == 0) {
+        ratio = max(ratio, coarseWeight)
+    }
+    return if (ratio >= DenseLineMinVisibleRatio) ratio else 0f
+}
+
+private fun smoothStep(value: Double): Double {
+    return value * value * (3.0 - 2.0 * value)
+}
+
+private fun positiveModulo(value: Int, mod: Int): Int {
+    return if (mod == 0) 0 else ((value % mod) + mod) % mod
+}
+
+private fun xenRulerHighlight(alpha: Int): Color {
+    return Color(0xFFFFDE6F).copy(alpha = alpha.coerceIn(0, 255) / 255f)
+}
+
 private val PianoRange = FullPianoRange
 private const val DefaultKeyPitchPreviewEnabled = false
+private const val HiddenExtraEdoMark = 'N'
+private const val SecondaryExtraEdoMark = '1'
+private const val MicrotonalKeyboardMinTickSpacingPx = 1.1f
+private const val MicrotonalCTickHeightRatio = 0.84f
+private const val MicrotonalCTickAlpha = 184
+private const val DenseLineStepEpsilon = 0.0001
+private const val DenseLineMinVisibleRatio = 0.02f
 private val ChordleBackground = Color(0xFF121213)
 private val ChordleSurface = Color(0xFF1A1A1B)
 private val ChordleText = Color(0xFFF8F8F8)
@@ -1664,3 +2233,88 @@ private val WordleBorder = Color(0xFF3A3A3C)
 private val ChordleGreen = Color(0xFF6AAA64)
 private val ChordleYellow = Color(0xFFCCB757)
 private val ChordleGray = Color(0xFF86888A)
+private val ExtraCorrectBlue = Color(0xFF8EB8FF)
+private val ExtraNearPink = Color(0xFFF0A9C8)
+private val ExtraEdoMarkRatios = mapOf(
+    '0' to 1f,
+    '1' to 0.8f,
+    '2' to 0.6f,
+    '3' to 0.4f,
+    '4' to 0.2f,
+    HiddenExtraEdoMark to 0f,
+    'S' to 0f
+)
+private val ExtraEdoScaleMarks = mapOf(
+    1 to "0N",
+    2 to "01",
+    3 to "011",
+    4 to "0111",
+    5 to "01111",
+    6 to "011111",
+    7 to "0111111",
+    8 to "02121212",
+    9 to "022122122",
+    10 to "0212121212",
+    11 to "02121121121",
+    12 to "021211212121",
+    13 to "0212112121121",
+    14 to "02121212121212",
+    15 to "022122122122122",
+    16 to "0323132313231323",
+    17 to "02212211221221221",
+    18 to "021212121212121212",
+    19 to "0221221212212212212",
+    20 to "03231331132313313231",
+    21 to "022122122122122122122",
+    22 to "0323132311323132313231",
+    23 to "03323323332331332332333",
+    24 to "032313231313231323132313",
+    25 to "0332332332323321323323323",
+    26 to "03231323133132313231323133",
+    27 to "033332333322333313333133332",
+    28 to "0323132313231323132313231323",
+    29 to "03333233332323333133331333323",
+    30 to "033332333233323333133323332333",
+    31 to "0333323333233233331333323333233",
+    32 to "03231323132313231323132313231323",
+    33 to "033332333323332333313333233332333",
+    34 to "0323231323231313232313232313232313",
+    35 to "03333233332333323333133332333323333",
+    36 to "033233233233133133233233233133233133",
+    37 to "0332331332331133233133233133233133233",
+    38 to "03232313232313231323231323231323231323",
+    39 to "033333323333332323333331333333233333323",
+    40 to "0332331332331333313323313323313323313333",
+    41 to "03333332333333233233333313333332333333233",
+    42 to "033323331333233311333233313332333133323331",
+    43 to "0333333233333323332333333133333323333332333",
+    44 to "03332333133323331313332333133323331333233313",
+    45 to "033333323333332333323333331333333233333323333",
+    46 to "0333233313332333133133323331333233313332333133",
+    47 to "03333332333333233333233333313333332333333233333",
+    48 to "033323331333233313331333233313332333133323331333",
+    49 to "0332332331332332331313323323313323323313323323313",
+    50 to "03332333133323331333313332333133323331333233313333",
+    51 to "033233233133233233133133233233133233233133233233133",
+    52 to "0333233313332333133333133323331333233313332333133333",
+    53 to "03333333323333333323332333333331333333332333333332333",
+    54 to "033323331333233313333331333233313332333133323331333333",
+    55 to "0332332331332332331333313323323313323323313323323313333",
+    56 to "03333233331333323333133133332333313333233331333323333133",
+    57 to "033233233133233233133233133233233133233233133233233133233",
+    58 to "0333323333133332333313331333323333133332333313333233331333",
+    59 to "04424344144243441442434414424434244144342441443424414434244",
+    60 to "044443444424444344442444424444344441444434444244443444424444",
+    61 to "0333333333323333333333233233333333331333333333323333333333233",
+    62 to "04343434342434343434243434243434343414343434342434343434243434",
+    63 to "033333333332333333333323332333333333313333333333233333333332333",
+    64 to "0434243414342434143424341434243414342434143424341434243414342434",
+    65 to "03333333333233333333332333323333333333133333333332333333333323333",
+    66 to "043434343424343434342434343424343434143434343424343434342434343424",
+    67 to "0333333333323333333333233333233333333331333333333323333333333233333",
+    68 to "04342434243414342434243414341434243424341434243424341434243424341434",
+    69 to "033333333332333333333323333332333333333313333333333233333333332333333",
+    70 to "0444443444442444443444442444424444434444414444434444424444434444424444",
+    71 to "03333333333332333333333333233233333333333313333333333332333333333333233",
+    72 to "044344244344144344244344144344144344244344144344244344144344244344144344"
+)
