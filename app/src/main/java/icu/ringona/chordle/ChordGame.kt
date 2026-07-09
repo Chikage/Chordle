@@ -80,6 +80,7 @@ const val MinOvertoneToneCount = 2
 const val MaxOvertoneToneCount = 10
 const val DefaultOvertoneToneCount = 4
 val DefaultPlayableRange = 48..72
+val DefaultExtraPlayableRange = 48..72
 val FullPianoRange = LowestPlayableMidiNote..HighestPlayableMidiNote
 val PlayableWhiteKeyMidiNotes = FullPianoRange.filter(::isWhiteMidiKey)
 val DefaultOvertoneRange = 8..16
@@ -131,7 +132,7 @@ data class ChordPuzzle(
 
         fun randomExtra(
             noteCount: Int = DefaultChordToneCount,
-            noteRange: IntRange = DefaultPlayableRange,
+            noteRange: IntRange = DefaultExtraPlayableRange,
             edo: Int = DefaultExtraEdo
         ): ChordPuzzle {
             val normalizedEdo = sanitizeExtraEdo(edo)

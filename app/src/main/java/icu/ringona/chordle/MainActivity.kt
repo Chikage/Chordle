@@ -249,6 +249,7 @@ private fun ChordleGameScreen(
     val scope = rememberCoroutineScope()
     val settings = remember { ChordleSettings(context) }
     var playableRange by remember { mutableStateOf(settings.loadPlayableRange()) }
+    var extraPlayableRange by remember { mutableStateOf(settings.loadExtraPlayableRange()) }
     var chordToneCount by remember { mutableStateOf(settings.loadChordToneCount()) }
     var extraEdo by remember { mutableStateOf(settings.loadExtraEdo()) }
     var overtoneRange by remember { mutableStateOf(settings.loadOvertoneRange()) }
@@ -259,7 +260,7 @@ private fun ChordleGameScreen(
         ChordleGame(
             when (mode) {
                 ChordleMode.Overtones -> ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange)
-                ChordleMode.Extra -> ChordPuzzle.randomExtra(chordToneCount, playableRange, extraEdo)
+                ChordleMode.Extra -> ChordPuzzle.randomExtra(chordToneCount, extraPlayableRange, extraEdo)
                 ChordleMode.Normal -> ChordPuzzle.random(chordToneCount, playableRange)
             }
         )
@@ -269,7 +270,7 @@ private fun ChordleGameScreen(
     var audioStatus by remember { mutableStateOf<AudioStatus>(AudioStatus.Loading) }
     val statusDetail = when (mode) {
         ChordleMode.Overtones -> "${game.columns} 音 · ${overtoneRangeLabel(overtoneRange)}"
-        ChordleMode.Extra -> "${game.columns} 音 · ${extraEdo}EDO · ${extraRangeLabel(extraEdo, playableRange)}"
+        ChordleMode.Extra -> "${game.columns} 音 · ${extraEdo}EDO · ${extraRangeLabel(extraEdo, extraPlayableRange)}"
         ChordleMode.Normal -> "${game.columns} 音 · ${rangeLabel(playableRange)}"
     }
     val valueStates = game.guessedValueStates()
@@ -340,7 +341,7 @@ private fun ChordleGameScreen(
                             game.newPuzzle(ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange))
                         }
                         ChordleMode.Extra -> {
-                            game.newPuzzle(ChordPuzzle.randomExtra(chordToneCount, playableRange, extraEdo))
+                            game.newPuzzle(ChordPuzzle.randomExtra(chordToneCount, extraPlayableRange, extraEdo))
                         }
                         ChordleMode.Normal -> {
                             game.newPuzzle(chordToneCount, playableRange)
@@ -470,7 +471,7 @@ private fun ChordleGameScreen(
                         if (isExtraMode) {
                             MicrotonalKeyboard(
                                 edo = extraEdo,
-                                noteRange = playableRange,
+                                noteRange = extraPlayableRange,
                                 selectedStep = selectedValue,
                                 valueStates = valueStates,
                                 onStepPressed = onValuePressed,
@@ -551,7 +552,7 @@ private fun ChordleGameScreen(
             )
         } else if (mode == ChordleMode.Extra) {
             ExtraSettingsDialog(
-                range = playableRange,
+                range = extraPlayableRange,
                 chordToneCount = chordToneCount,
                 extraEdo = extraEdo,
                 instrumentProgram = instrumentProgram,
@@ -563,19 +564,19 @@ private fun ChordleGameScreen(
                     val nextEdo = sanitizeExtraEdo(edo)
                     val nextProgram = sanitizeMidiProgramNumber(program)
                     val shouldCreateNewPuzzle =
-                        nextRange != playableRange || nextToneCount != chordToneCount || nextEdo != extraEdo
-                    playableRange = nextRange
+                        nextRange != extraPlayableRange || nextToneCount != chordToneCount || nextEdo != extraEdo
+                    extraPlayableRange = nextRange
                     chordToneCount = nextToneCount
                     extraEdo = nextEdo
                     instrumentProgram = nextProgram
                     keyPitchPreviewEnabled = previewEnabled
-                    settings.savePlayableRange(playableRange)
+                    settings.saveExtraPlayableRange(extraPlayableRange)
                     settings.saveChordToneCount(chordToneCount)
                     settings.saveExtraEdo(extraEdo)
                     settings.saveInstrumentProgram(instrumentProgram)
                     settings.saveKeyPitchPreviewEnabled(keyPitchPreviewEnabled)
                     if (shouldCreateNewPuzzle) {
-                        game.newPuzzle(ChordPuzzle.randomExtra(chordToneCount, playableRange, extraEdo))
+                        game.newPuzzle(ChordPuzzle.randomExtra(chordToneCount, extraPlayableRange, extraEdo))
                     }
                     showSettings = false
                     if (audioStatus == AudioStatus.Ready) {
@@ -1909,6 +1910,20 @@ private class ChordleSettings(context: android.content.Context) {
             .apply()
     }
 
+    fun loadExtraPlayableRange(): IntRange {
+        val low = preferences.getInt(KEY_EXTRA_LOW, DefaultExtraPlayableRange.first)
+        val high = preferences.getInt(KEY_EXTRA_HIGH, DefaultExtraPlayableRange.last)
+        return sanitizeExtraPlayableRange(low..high)
+    }
+
+    fun saveExtraPlayableRange(range: IntRange) {
+        val sanitized = sanitizeExtraPlayableRange(range)
+        preferences.edit()
+            .putInt(KEY_EXTRA_LOW, sanitized.first)
+            .putInt(KEY_EXTRA_HIGH, sanitized.last)
+            .apply()
+    }
+
     fun loadChordToneCount(): Int {
         return sanitizeChordToneCount(preferences.getInt(KEY_TONE_COUNT, DefaultChordToneCount))
     }
@@ -1979,6 +1994,8 @@ private class ChordleSettings(context: android.content.Context) {
     private companion object {
         const val KEY_LOW = "playable_range_low"
         const val KEY_HIGH = "playable_range_high"
+        const val KEY_EXTRA_LOW = "extra_playable_range_low"
+        const val KEY_EXTRA_HIGH = "extra_playable_range_high"
         const val KEY_TONE_COUNT = "chord_tone_count"
         const val KEY_EXTRA_EDO = "extra_edo"
         const val KEY_OVERTONE_LOW = "overtone_range_low"
@@ -2288,8 +2305,8 @@ private fun ExtraSettingsDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
-                            low = DefaultPlayableRange.first.toFloat()
-                            high = DefaultPlayableRange.last.toFloat()
+                            low = DefaultExtraPlayableRange.first.toFloat()
+                            high = DefaultExtraPlayableRange.last.toFloat()
                             toneCount = DefaultChordToneCount.toFloat()
                             edo = DefaultExtraEdo.toFloat()
                             program = DefaultMidiProgramNumber.toFloat()
