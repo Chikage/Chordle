@@ -3,6 +3,7 @@ package icu.ringona.chordle
 import android.graphics.Paint as AndroidPaint
 import android.graphics.Typeface
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -35,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -134,7 +137,11 @@ private fun ChordleApp() {
     when (selectedMode) {
         null -> ModeSelectionScreen(onModeSelected = { selectedMode = it })
         ChordleMode.Normal,
-        ChordleMode.Extra -> ChordleGameScreen()
+        ChordleMode.Extra -> ChordleGameScreen(
+            onBackToModeSelection = {
+                selectedMode = null
+            }
+        )
     }
 }
 
@@ -195,7 +202,9 @@ private fun ModeSelectionScreen(
 }
 
 @Composable
-private fun ChordleGameScreen() {
+private fun ChordleGameScreen(
+    onBackToModeSelection: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings = remember { ChordleSettings(context) }
@@ -206,6 +215,11 @@ private fun ChordleGameScreen() {
     var showHelp by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var audioStatus by remember { mutableStateOf<AudioStatus>(AudioStatus.Loading) }
+
+    BackHandler(enabled = !showHelp && !showSettings) {
+        NativeAudioEngine.allSoundOff()
+        onBackToModeSelection()
+    }
 
     LaunchedEffect(Unit) {
         audioStatus = withContext(Dispatchers.IO) {
@@ -466,8 +480,10 @@ private fun GameStatusLine(
             overflow = TextOverflow.Ellipsis
         )
         Row(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.End,
+            modifier = Modifier
+                .weight(1f)
+                .height(34.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -475,8 +491,10 @@ private fun GameStatusLine(
                 color = ChordleMuted,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
+                lineHeight = 18.sp,
                 modifier = Modifier.align(Alignment.CenterVertically)
             )
+            Spacer(modifier = Modifier.width(8.dp))
             Box(
                 modifier = Modifier
                     .size(34.dp)
@@ -484,7 +502,12 @@ private fun GameStatusLine(
                     .clickable(onClick = onNewPuzzle),
                 contentAlignment = Alignment.Center
             ) {
-                Text("↻", fontSize = 22.sp, color = ChordleMuted, fontWeight = FontWeight.Bold)
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_restart_24),
+                    contentDescription = "重新开始",
+                    tint = ChordleMuted,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
     }
