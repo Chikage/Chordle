@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -208,6 +209,16 @@ private fun ChordleApp() {
                         playNotes(game.rowNotes(row), program = instrumentProgram, durationMillis = 1200)
                     }
                 },
+                onPlayNote = { note ->
+                    scope.launch {
+                        playNotes(
+                            listOf(note),
+                            velocity = 92,
+                            program = instrumentProgram,
+                            durationMillis = 520
+                        )
+                    }
+                },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -326,16 +337,12 @@ private fun ChordleHeader(
             overflow = TextOverflow.Clip
         )
 
-        Row(
+        TextButton(
+            onClick = onSettings,
             modifier = Modifier.align(Alignment.CenterEnd),
-            verticalAlignment = Alignment.CenterVertically
+            contentPadding = PaddingValues(horizontal = 6.dp)
         ) {
-            TextButton(
-                onClick = onSettings,
-                contentPadding = PaddingValues(horizontal = 6.dp)
-            ) {
-                Text("⚙", fontSize = 21.sp, color = ChordleMuted, fontWeight = FontWeight.Bold)
-            }
+            Text("⚙", fontSize = 21.sp, color = ChordleMuted, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -395,12 +402,15 @@ private fun GameStatusLine(
                 text = "$attempt/$maxAttempts",
                 color = ChordleMuted,
                 fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.CenterVertically)
             )
-            TextButton(
-                onClick = onNewPuzzle,
-                modifier = Modifier.size(34.dp),
-                contentPadding = PaddingValues(0.dp)
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .align(Alignment.CenterVertically)
+                    .clickable(onClick = onNewPuzzle),
+                contentAlignment = Alignment.Center
             ) {
                 Text("↻", fontSize = 22.sp, color = ChordleMuted, fontWeight = FontWeight.Bold)
             }
@@ -413,6 +423,7 @@ private fun BoardArea(
     game: ChordleGame,
     audioReady: Boolean,
     onPlayRow: (Int) -> Unit,
+    onPlayNote: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(
@@ -420,35 +431,49 @@ private fun BoardArea(
         contentAlignment = Alignment.Center
     ) {
         val gap = 6.dp
+        val playButtonLane = 40.dp
         val tileSize = remember(maxWidth, maxHeight, game.columns) {
-            val playButtonSpace = 40.dp
-            val horizontal = (maxWidth - playButtonSpace - gap * game.columns) / game.columns
+            val horizontal = (maxWidth - playButtonLane * 2 - gap * (game.columns - 1)) / game.columns
             val vertical = (maxHeight - gap * (game.maxAttempts - 1)) / game.maxAttempts
             minOf(64.dp, horizontal, vertical)
         }
+        val rowWidth = tileSize * game.columns + gap * (game.columns - 1) + playButtonLane * 2
 
         Column(
             verticalArrangement = Arrangement.spacedBy(gap),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             repeat(game.maxAttempts) { row ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .width(rowWidth)
+                        .height(tileSize),
+                    contentAlignment = Alignment.Center
                 ) {
-                    repeat(game.columns) { column ->
-                        ChordTile(
-                            cell = game.cell(row, column),
-                            active = game.status == GameStatus.Playing &&
-                                row == game.currentRow &&
-                                column == game.currentColumn,
-                            size = tileSize
-                        )
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(game.columns) { column ->
+                            ChordTile(
+                                cell = game.cell(row, column),
+                                active = game.status == GameStatus.Playing &&
+                                    row == game.currentRow &&
+                                    column == game.currentColumn,
+                                size = tileSize,
+                                onClick = game.cell(row, column).note
+                                    ?.takeIf { audioReady }
+                                    ?.let { note -> { onPlayNote(note) } }
+                            )
+                        }
                     }
                     TextButton(
                         onClick = { onPlayRow(row) },
                         enabled = audioReady && game.rowNotes(row).isNotEmpty(),
-                        modifier = Modifier.size(34.dp),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(34.dp),
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Text(
@@ -468,7 +493,8 @@ private fun BoardArea(
 private fun ChordTile(
     cell: GuessCell,
     active: Boolean,
-    size: Dp
+    size: Dp,
+    onClick: (() -> Unit)?
 ) {
     val background = when (cell.state) {
         TileState.Correct -> ChordleGreen
@@ -487,7 +513,8 @@ private fun ChordTile(
         modifier = Modifier
             .size(size)
             .background(background)
-            .border(width = 2.dp, color = border),
+            .border(width = 2.dp, color = border)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
         Text(

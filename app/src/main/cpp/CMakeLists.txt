@@ -28,6 +28,20 @@ add_library(xenaudio SHARED
         XenAudioEngine.cpp
         )
 
+target_compile_options(xenaudio PRIVATE
+        -ffunction-sections
+        -fdata-sections
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+        $<$<CONFIG:Release>:-Oz>
+        $<$<CONFIG:RelWithDebInfo>:-Oz>
+        $<$<CONFIG:RelWithDebInfo>:-g0>
+        )
+
+target_link_options(xenaudio PRIVATE
+        -Wl,--gc-sections
+        )
+
 foreach (FLUID_SYNTH_LIB_FILE ${FLUID_SYNTH_LIB_FILES})
     add_library(${FLUID_SYNTH_LIB_FILE} SHARED IMPORTED)
     set_target_properties(${FLUID_SYNTH_LIB_FILE} PROPERTIES
@@ -46,4 +60,3 @@ target_link_libraries(xenaudio
         android
         log
         )
-
