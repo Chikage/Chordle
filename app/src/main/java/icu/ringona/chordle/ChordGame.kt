@@ -9,6 +9,18 @@ import kotlin.random.Random
 
 private val pitchNames = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
+const val LowestPlayableMidiNote = 21
+const val HighestPlayableMidiNote = 108
+const val MinimumPlayableRangeSemitones = 12
+const val MinChordToneCount = 1
+const val MaxChordToneCount = 10
+const val DefaultChordToneCount = 3
+const val MinMidiProgramNumber = 0
+const val MaxMidiProgramNumber = 127
+const val DefaultMidiProgramNumber = 0
+val DefaultPlayableRange = 48..72
+val FullPianoRange = LowestPlayableMidiNote..HighestPlayableMidiNote
+
 enum class TileState {
     Empty,
     Input,
@@ -33,37 +45,26 @@ data class ChordPuzzle(
     val label: String
 ) {
     companion object {
-        fun random(noteCount: Int = 3): ChordPuzzle {
-            val templates = when (noteCount) {
-                4 -> listOf(
-                    "maj7" to listOf(0, 4, 7, 11),
-                    "min7" to listOf(0, 3, 7, 10),
-                    "7" to listOf(0, 4, 7, 10),
-                    "m7b5" to listOf(0, 3, 6, 10)
-                )
-                5 -> listOf(
-                    "maj9" to listOf(0, 4, 7, 11, 14),
-                    "min9" to listOf(0, 3, 7, 10, 14),
-                    "9" to listOf(0, 4, 7, 10, 14)
-                )
-                else -> listOf(
-                    "major" to listOf(0, 4, 7),
-                    "minor" to listOf(0, 3, 7),
-                    "dim" to listOf(0, 3, 6),
-                    "sus4" to listOf(0, 5, 7),
-                    "aug" to listOf(0, 4, 8)
-                )
+        fun random(noteCount: Int = DefaultChordToneCount, noteRange: IntRange = DefaultPlayableRange): ChordPuzzle {
+            val playableRange = sanitizePlayableRange(noteRange)
+            val sanitizedCount = sanitizeChordToneCount(noteCount)
+            val availableNotes = playableRange.toList()
+            val notes = availableNotes
+                .shuffled()
+                .take(sanitizedCount.coerceAtMost(availableNotes.size))
+                .sorted()
+            val label = if (notes.size == 1) {
+                "${noteLabel(notes.first())} single"
+            } else {
+                "${notes.size}-tone"
             }
-            val (quality, intervals) = templates.random()
-            val root = Random.nextInt(43, 60)
-            val notes = intervals.map { root + it }
-            return ChordPuzzle(notes = notes, label = "${noteLabel(root)} $quality")
+            return ChordPuzzle(notes = notes, label = label)
         }
     }
 }
 
 class ChordleGame(
-    initialPuzzle: ChordPuzzle = ChordPuzzle.random(3),
+    initialPuzzle: ChordPuzzle = ChordPuzzle.random(DefaultChordToneCount),
     val maxAttempts: Int = 6
 ) {
     var puzzle by mutableStateOf(initialPuzzle)
@@ -160,8 +161,8 @@ class ChordleGame(
         selectedNote = null
     }
 
-    fun newPuzzle(noteCount: Int = columns) {
-        puzzle = ChordPuzzle.random(noteCount)
+    fun newPuzzle(noteCount: Int = columns, noteRange: IntRange = DefaultPlayableRange) {
+        puzzle = ChordPuzzle.random(sanitizeChordToneCount(noteCount), noteRange)
         currentRow = 0
         currentColumn = 0
         selectedNote = null
@@ -182,7 +183,7 @@ class ChordleGame(
         return rowNotes(row).size == columns
     }
 
-    private fun rowNotes(row: Int): List<Int> {
+    fun rowNotes(row: Int): List<Int> {
         return (0 until columns).mapNotNull { column -> cell(row, column).note }
     }
 
@@ -231,6 +232,29 @@ fun noteLabel(midiNote: Int): String {
     return "$pitch$octave"
 }
 
+fun rangeLabel(range: IntRange): String {
+    val sanitized = sanitizePlayableRange(range)
+    return "${noteLabel(sanitized.first)}-${noteLabel(sanitized.last)}"
+}
+
+fun sanitizePlayableRange(range: IntRange): IntRange {
+    var low = range.first.coerceIn(LowestPlayableMidiNote, HighestPlayableMidiNote - MinimumPlayableRangeSemitones)
+    var high = range.last.coerceIn(LowestPlayableMidiNote + MinimumPlayableRangeSemitones, HighestPlayableMidiNote)
+    if (high - low < MinimumPlayableRangeSemitones) {
+        high = (low + MinimumPlayableRangeSemitones).coerceAtMost(HighestPlayableMidiNote)
+        low = (high - MinimumPlayableRangeSemitones).coerceAtLeast(LowestPlayableMidiNote)
+    }
+    return low..high
+}
+
+fun sanitizeChordToneCount(noteCount: Int): Int {
+    return noteCount.coerceIn(MinChordToneCount, MaxChordToneCount)
+}
+
+fun sanitizeMidiProgramNumber(program: Int): Int {
+    return program.coerceIn(MinMidiProgramNumber, MaxMidiProgramNumber)
+}
+
 fun isBlackKey(midiNote: Int): Boolean {
     return when (midiNote.floorMod(12)) {
         1, 3, 6, 8, 10 -> true
@@ -241,4 +265,3 @@ fun isBlackKey(midiNote: Int): Boolean {
 private fun Int.floorMod(other: Int): Int {
     return ((this % other) + other) % other
 }
-
