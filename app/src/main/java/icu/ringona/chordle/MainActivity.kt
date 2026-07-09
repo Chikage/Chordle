@@ -2220,7 +2220,7 @@ private fun edoMarkerForStep(edo: Int, octaveStep: Int): Char {
 private fun shouldDrawMicrotonalStepLabel(edo: Int, marker: Char): Boolean {
     val normalizedEdo = sanitizeExtraEdo(edo)
     return marker == SecondaryExtraEdoMark ||
-        (normalizedEdo == 53 && marker == TertiaryExtraEdoMark)
+        (marker == TertiaryExtraEdoMark && normalizedEdo in ExtraEdoTertiaryStepLabelEdos)
 }
 
 private fun denseLineVisibilityRatio(
@@ -2326,9 +2326,9 @@ private val ExtraEdoScaleMarks = mapOf(
     24 to "032313231313231323132313",
     25 to "0332332332323321323323323",
     26 to "03231323133132313231323133",
-    27 to "033332333322333313333133332",
+    27 to "033332333322333313333233332",
     28 to "0323132313231323132313231323",
-    29 to "03333233332323333133331333323",
+    29 to "03333233332323333133332333323",
     30 to "033332333233323333133323332333",
     31 to "0333323333233233331333323333233",
     32 to "03231323132313231323132313231323",
@@ -2373,3 +2373,8 @@ private val ExtraEdoScaleMarks = mapOf(
     71 to "03333333333332333333333333233233333333333313333333333332333333333333233",
     72 to "044344244344144344244344144344144344244344144344244344144344244344144344"
 )
+private val ExtraEdoTertiaryStepLabelEdos = ExtraEdoScaleMarks
+    .filter { (edo, marks) ->
+        edo >= 20 && marks.count { it == SecondaryExtraEdoMark } <= 3
+    }
+    .keys

@@ -12,20 +12,39 @@ val localProperties = Properties().apply {
     }
 }
 
-fun signingProperty(name: String): String? =
-    providers.gradleProperty(name).orNull
-        ?: localProperties.getProperty(name)
-        ?: providers.environmentVariable(name).orNull
+val justPianoProperties = Properties().apply {
+    val justPianoPropertiesFile = rootProject.projectDir.parentFile
+        ?.resolve("JustPiano/gradle.properties")
+    if (justPianoPropertiesFile?.isFile == true) {
+        justPianoPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun signingProperty(vararg names: String): String? =
+    names.firstNotNullOfOrNull { name ->
+        providers.gradleProperty(name).orNull
+            ?: localProperties.getProperty(name)
+            ?: justPianoProperties.getProperty(name)
+            ?: providers.environmentVariable(name).orNull
+    }
+
+fun requiredSigningProperty(value: String?, description: String): String =
+    value?.takeIf(String::isNotBlank)
+        ?: error("Release signing requires $description")
 
 val releaseStoreFile = rootProject.file("key.jks")
-val releaseStorePassword = signingProperty("RELEASE_STORE_PASSWORD")
-val releaseKeyAlias = signingProperty("RELEASE_KEY_ALIAS") ?: "as2134u"
-val releaseKeyPassword = signingProperty("RELEASE_KEY_PASSWORD") ?: releaseStorePassword
-val hasReleaseSigning =
-    releaseStoreFile.isFile &&
-        !releaseStorePassword.isNullOrBlank() &&
-        !releaseKeyAlias.isNullOrBlank() &&
-        !releaseKeyPassword.isNullOrBlank()
+check(releaseStoreFile.isFile) {
+    "Release signing requires ${releaseStoreFile.absolutePath}"
+}
+val releaseStorePassword = requiredSigningProperty(
+    signingProperty("RELEASE_STORE_PASSWORD", "sign.store.password"),
+    "RELEASE_STORE_PASSWORD or sign.store.password"
+)
+val releaseKeyAlias = signingProperty("RELEASE_KEY_ALIAS", "sign.key.alias") ?: "as2134u"
+val releaseKeyPassword = requiredSigningProperty(
+    signingProperty("RELEASE_KEY_PASSWORD", "sign.key.password") ?: releaseStorePassword,
+    "RELEASE_KEY_PASSWORD or sign.key.password"
+)
 
 android {
     namespace = "icu.ringona.chordle"
@@ -89,9 +108,7 @@ android {
 
     buildTypes {
         release {
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
