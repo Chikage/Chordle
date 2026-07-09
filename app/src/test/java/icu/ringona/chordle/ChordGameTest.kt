@@ -199,9 +199,20 @@ class ChordGameTest {
     }
 
     @Test
-    fun evaluateExtraGuessMarksNearChordToneWrongPositionPink() {
+    fun evaluateExtraGuessMarksExactChordToneWrongPositionYellow() {
         val result = evaluateExtraGuess(
             guess = listOf(108, 96),
+            answer = listOf(96, 108),
+            edo = 24
+        )
+
+        assertEquals(listOf(TileState.Present, TileState.Present), result)
+    }
+
+    @Test
+    fun evaluateExtraGuessMarksNearChordToneWrongPositionPink() {
+        val result = evaluateExtraGuess(
+            guess = listOf(109, 97),
             answer = listOf(96, 108),
             edo = 24
         )

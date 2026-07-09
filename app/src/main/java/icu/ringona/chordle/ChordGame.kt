@@ -380,6 +380,9 @@ fun evaluateExtraGuess(guess: List<Int>, answer: List<Int>, edo: Int): List<Tile
             answerAtPosition != null && note == answerAtPosition -> {
                 TileState.Correct
             }
+            answer.contains(note) -> {
+                TileState.Present
+            }
             answerAtPosition != null && extraStepCentsDistance(note, answerAtPosition, normalizedEdo) <= ExtraPitchToleranceCents -> {
                 TileState.ExtraCorrect
             }

@@ -834,16 +834,36 @@ private fun ChordTile(
     ) {
         val label = cell.note?.let(valueLabel).orEmpty()
         val multiline = label.contains('\n')
-        Text(
-            text = label,
-            color = Color.White,
-            fontSize = if (multiline) 13.sp else 18.sp,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center,
-            lineHeight = if (multiline) 16.sp else 20.sp,
-            maxLines = if (multiline) 2 else 1,
-            overflow = TextOverflow.Clip
-        )
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 3.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val longestLineLength = label
+                .lines()
+                .maxOfOrNull { it.length }
+                ?.coerceAtLeast(1) ?: 1
+            val lineCount = if (multiline) 2 else 1
+            val baseFontSize = if (multiline) 13f else 18f
+            val widthLimitedFontSize = maxWidth.value / (longestLineLength * 0.58f)
+            val heightLimitedFontSize = maxHeight.value / (lineCount * 1.18f)
+            val fittedFontSize = min(
+                baseFontSize,
+                min(widthLimitedFontSize, heightLimitedFontSize)
+            ).coerceAtLeast(8f)
+            Text(
+                text = label,
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                fontSize = fittedFontSize.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                lineHeight = (fittedFontSize * if (multiline) 1.16f else 1.1f).sp,
+                maxLines = if (multiline) 2 else 1,
+                overflow = TextOverflow.Clip
+            )
+        }
     }
 }
 
@@ -1432,9 +1452,14 @@ private fun HelpDialog(
                         Text("淡蓝：该位置音高误差在 50 音分内")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ChordleYellow)
+                        Spacer(Modifier.width(8.dp))
+                        Text("黄色：音高完全正确，但位置不对")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         RuleChip(color = ExtraNearPink)
                         Spacer(Modifier.width(8.dp))
-                        Text("淡粉：和弦内有 50 音分内的音，但位置不对")
+                        Text("淡粉：和弦内有 50 音分内的近似音，但位置不对")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RuleChip(color = ChordleGray)
