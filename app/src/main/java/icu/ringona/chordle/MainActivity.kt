@@ -106,6 +106,11 @@ private sealed interface AudioStatus {
     data class Error(val message: String) : AudioStatus
 }
 
+private enum class ChordleMode {
+    Normal,
+    Extra
+}
+
 @Composable
 private fun ChordleTheme(content: @Composable () -> Unit) {
     MaterialTheme(
@@ -124,6 +129,73 @@ private fun ChordleTheme(content: @Composable () -> Unit) {
 
 @Composable
 private fun ChordleApp() {
+    var selectedMode by remember { mutableStateOf<ChordleMode?>(null) }
+
+    when (selectedMode) {
+        null -> ModeSelectionScreen(onModeSelected = { selectedMode = it })
+        ChordleMode.Normal,
+        ChordleMode.Extra -> ChordleGameScreen()
+    }
+}
+
+@Composable
+private fun ModeSelectionScreen(
+    onModeSelected: (ChordleMode) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ChordleBackground)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text(
+                text = "Chordle",
+                color = ChordleText,
+                fontSize = 42.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Serif,
+                maxLines = 1,
+                overflow = TextOverflow.Clip
+            )
+            Text(
+                text = "选择模式",
+                color = ChordleMuted,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = { onModeSelected(ChordleMode.Normal) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = ChordleGreen)
+            ) {
+                Text("Normal", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton(
+                onClick = { onModeSelected(ChordleMode.Extra) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text("Extra", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChordleGameScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings = remember { ChordleSettings(context) }
