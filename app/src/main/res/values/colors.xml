@@ -1,0 +1,7 @@
+<resources>
+    <color name="chordle_background">#121213</color>
+    <color name="chordle_surface">#1A1A1B</color>
+    <color name="chordle_text">#F8F8F8</color>
+    <color name="chordle_accent">#6AAA64</color>
+</resources>
+
