@@ -1,3 +1,3 @@
-C:/Users/Administrator/Documents/GitHub/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a/CMakeFiles/xenaudio.dir
-C:/Users/Administrator/Documents/GitHub/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a/CMakeFiles/edit_cache.dir
-C:/Users/Administrator/Documents/GitHub/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a/CMakeFiles/rebuild_cache.dir
+/Volumes/Files/Github/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a/CMakeFiles/xenaudio.dir
+/Volumes/Files/Github/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a/CMakeFiles/edit_cache.dir
+/Volumes/Files/Github/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a/CMakeFiles/rebuild_cache.dir

@@ -1,1 +1,1 @@
-C:\Users\Administrator\Documents\GitHub\Chordle\app\src\main\cpp\CMakeLists.txt
+/Volumes/Files/Github/Chordle/app/src/main/cpp/CMakeLists.txt
