@@ -39,8 +39,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -80,7 +82,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,7 +115,8 @@ private sealed interface AudioStatus {
 
 private enum class ChordleMode {
     Normal,
-    Extra
+    Extra,
+    Overtones
 }
 
 @Composable
@@ -137,7 +142,9 @@ private fun ChordleApp() {
     when (selectedMode) {
         null -> ModeSelectionScreen(onModeSelected = { selectedMode = it })
         ChordleMode.Normal,
-        ChordleMode.Extra -> ChordleGameScreen(
+        ChordleMode.Extra,
+        ChordleMode.Overtones -> ChordleGameScreen(
+            mode = selectedMode!!,
             onBackToModeSelection = {
                 selectedMode = null
             }
@@ -197,12 +204,21 @@ private fun ModeSelectionScreen(
             ) {
                 Text("Extra", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
+            OutlinedButton(
+                onClick = { onModeSelected(ChordleMode.Overtones) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text("Overtones", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
 
 @Composable
 private fun ChordleGameScreen(
+    mode: ChordleMode,
     onBackToModeSelection: () -> Unit
 ) {
     val context = LocalContext.current
@@ -210,11 +226,27 @@ private fun ChordleGameScreen(
     val settings = remember { ChordleSettings(context) }
     var playableRange by remember { mutableStateOf(settings.loadPlayableRange()) }
     var chordToneCount by remember { mutableStateOf(settings.loadChordToneCount()) }
+    var overtoneRange by remember { mutableStateOf(settings.loadOvertoneRange()) }
+    var overtoneToneCount by remember { mutableStateOf(settings.loadOvertoneToneCount()) }
     var instrumentProgram by remember { mutableStateOf(settings.loadInstrumentProgram()) }
-    val game = remember { ChordleGame(ChordPuzzle.random(chordToneCount, playableRange)) }
+    var keyPitchPreviewEnabled by remember { mutableStateOf(settings.loadKeyPitchPreviewEnabled()) }
+    val game = remember(mode) {
+        ChordleGame(
+            when (mode) {
+                ChordleMode.Overtones -> ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange)
+                ChordleMode.Normal,
+                ChordleMode.Extra -> ChordPuzzle.random(chordToneCount, playableRange)
+            }
+        )
+    }
     var showHelp by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var audioStatus by remember { mutableStateOf<AudioStatus>(AudioStatus.Loading) }
+    val statusDetail = when (mode) {
+        ChordleMode.Overtones -> "${game.columns} 音 · ${overtoneRangeLabel(overtoneRange)}"
+        ChordleMode.Normal,
+        ChordleMode.Extra -> "${game.columns} 音 · ${rangeLabel(playableRange)}"
+    }
 
     BackHandler(enabled = !showHelp && !showSettings) {
         NativeAudioEngine.allSoundOff()
@@ -272,16 +304,27 @@ private fun ChordleGameScreen(
 
             GameStatusLine(
                 audioStatus = audioStatus,
-                toneCount = game.columns,
-                noteRange = playableRange,
+                detailText = statusDetail,
                 attempt = game.currentRow + 1,
                 maxAttempts = game.maxAttempts,
                 onNewPuzzle = {
                     NativeAudioEngine.allSoundOff()
-                    game.newPuzzle(chordToneCount, playableRange)
+                    when (mode) {
+                        ChordleMode.Overtones -> {
+                            game.newPuzzle(ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange))
+                        }
+                        ChordleMode.Normal,
+                        ChordleMode.Extra -> {
+                            game.newPuzzle(chordToneCount, playableRange)
+                        }
+                    }
                     if (audioStatus == AudioStatus.Ready) {
                         scope.launch {
-                            playNotes(game.puzzle.notes, program = instrumentProgram, durationMillis = 1400)
+                            playTones(
+                                playbackTonesForMode(mode, game.puzzle, game.puzzle.notes),
+                                program = instrumentProgram,
+                                durationMillis = 1400
+                            )
                         }
                     }
                 }
@@ -292,50 +335,89 @@ private fun ChordleGameScreen(
                 audioReady = audioStatus == AudioStatus.Ready,
                 onPlayRow = { row ->
                     scope.launch {
-                        playNotes(game.rowNotes(row), program = instrumentProgram, durationMillis = 1200)
+                        playTones(
+                            playbackTonesForMode(mode, game.puzzle, game.rowNotes(row)),
+                            program = instrumentProgram,
+                            durationMillis = 1200
+                        )
                     }
                 },
-                onPlayNote = { note ->
+                onPlayValue = { value ->
                     scope.launch {
-                        playNotes(
-                            listOf(note),
+                        playTones(
+                            playbackTonesForMode(mode, game.puzzle, listOf(value)),
                             velocity = 92,
                             program = instrumentProgram,
                             durationMillis = 520
                         )
                     }
                 },
+                valueLabel = valueLabelForMode(mode),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             )
 
-            InputPanel(
-                game = game,
-                audioReady = audioStatus == AudioStatus.Ready,
-                onPlayChord = {
-                    if (audioStatus == AudioStatus.Ready) {
-                        scope.launch {
-                            playNotes(game.puzzle.notes, program = instrumentProgram, durationMillis = 1600)
+            if (mode == ChordleMode.Overtones) {
+                OvertoneInputPanel(
+                    game = game,
+                    overtoneRange = overtoneRange,
+                    audioReady = audioStatus == AudioStatus.Ready,
+                    onPlayChord = {
+                        if (audioStatus == AudioStatus.Ready) {
+                            scope.launch {
+                                playTones(
+                                    playbackTonesForMode(mode, game.puzzle, game.puzzle.notes),
+                                    program = instrumentProgram,
+                                    durationMillis = 1600
+                                )
+                            }
+                        } else {
+                            game.clearMessage()
                         }
-                    } else {
-                        game.clearMessage()
-                    }
-                },
-                onPreviewNote = { note ->
-                    game.selectNote(note)
-                    if (audioStatus == AudioStatus.Ready) {
-                        scope.launch {
-                            playNotes(
-                                listOf(note),
-                                velocity = 92,
-                                program = instrumentProgram,
-                                durationMillis = 520
-                            )
+                    },
+                    onPreviewMultiplier = { multiplier ->
+                        game.selectNote(multiplier)
+                        if (keyPitchPreviewEnabled && audioStatus == AudioStatus.Ready) {
+                            scope.launch {
+                                playTones(
+                                    playbackTonesForMode(mode, game.puzzle, listOf(multiplier)),
+                                    velocity = 92,
+                                    program = instrumentProgram,
+                                    durationMillis = 520
+                                )
+                            }
                         }
                     }
-                }
-            )
+                )
+            } else {
+                InputPanel(
+                    game = game,
+                    audioReady = audioStatus == AudioStatus.Ready,
+                    onPlayChord = {
+                        if (audioStatus == AudioStatus.Ready) {
+                            scope.launch {
+                                playNotes(game.puzzle.notes, program = instrumentProgram, durationMillis = 1600)
+                            }
+                        } else {
+                            game.clearMessage()
+                        }
+                    },
+                    onPreviewNote = { note ->
+                        game.selectNote(note)
+                        if (keyPitchPreviewEnabled && audioStatus == AudioStatus.Ready) {
+                            scope.launch {
+                                playNotes(
+                                    listOf(note),
+                                    velocity = 92,
+                                    program = instrumentProgram,
+                                    durationMillis = 520
+                                )
+                            }
+                        }
+                    }
+                )
+            }
         }
 
         val message = game.message
@@ -359,36 +441,76 @@ private fun ChordleGameScreen(
     }
 
     if (showHelp) {
-        HelpDialog(onDismiss = { showHelp = false })
+        HelpDialog(mode = mode, onDismiss = { showHelp = false })
     }
     if (showSettings) {
-        RangeSettingsDialog(
-            range = playableRange,
-            chordToneCount = chordToneCount,
-            instrumentProgram = instrumentProgram,
-            onDismiss = { showSettings = false },
-            onSave = { range, toneCount, program ->
-                val nextRange = sanitizePlayableRange(range)
-                val nextToneCount = sanitizeChordToneCount(toneCount)
-                val nextProgram = sanitizeMidiProgramNumber(program)
-                val shouldCreateNewPuzzle = nextRange != playableRange || nextToneCount != chordToneCount
-                playableRange = nextRange
-                chordToneCount = nextToneCount
-                instrumentProgram = nextProgram
-                settings.savePlayableRange(playableRange)
-                settings.saveChordToneCount(chordToneCount)
-                settings.saveInstrumentProgram(instrumentProgram)
-                if (shouldCreateNewPuzzle) {
-                    game.newPuzzle(chordToneCount, playableRange)
-                }
-                showSettings = false
-                if (audioStatus == AudioStatus.Ready) {
-                    scope.launch {
-                        playNotes(game.puzzle.notes, program = instrumentProgram, durationMillis = 1400)
+        if (mode == ChordleMode.Overtones) {
+            OvertoneSettingsDialog(
+                multiplierRange = overtoneRange,
+                toneCount = overtoneToneCount,
+                instrumentProgram = instrumentProgram,
+                keyPitchPreviewEnabled = keyPitchPreviewEnabled,
+                onDismiss = { showSettings = false },
+                onSave = { range, toneCount, program, previewEnabled ->
+                    val nextRange = sanitizeOvertoneRange(range)
+                    val nextToneCount = sanitizeOvertoneToneCount(toneCount, nextRange)
+                    val nextProgram = sanitizeMidiProgramNumber(program)
+                    val shouldCreateNewPuzzle = nextRange != overtoneRange || nextToneCount != overtoneToneCount
+                    overtoneRange = nextRange
+                    overtoneToneCount = nextToneCount
+                    instrumentProgram = nextProgram
+                    keyPitchPreviewEnabled = previewEnabled
+                    settings.saveOvertoneRange(overtoneRange)
+                    settings.saveOvertoneToneCount(overtoneToneCount, overtoneRange)
+                    settings.saveInstrumentProgram(instrumentProgram)
+                    settings.saveKeyPitchPreviewEnabled(keyPitchPreviewEnabled)
+                    if (shouldCreateNewPuzzle) {
+                        game.newPuzzle(ChordPuzzle.randomOvertones(overtoneToneCount, overtoneRange))
+                    }
+                    showSettings = false
+                    if (audioStatus == AudioStatus.Ready) {
+                        scope.launch {
+                            playTones(
+                                playbackTonesForMode(mode, game.puzzle, game.puzzle.notes),
+                                program = instrumentProgram,
+                                durationMillis = 1400
+                            )
+                        }
                     }
                 }
-            }
-        )
+            )
+        } else {
+            RangeSettingsDialog(
+                range = playableRange,
+                chordToneCount = chordToneCount,
+                instrumentProgram = instrumentProgram,
+                keyPitchPreviewEnabled = keyPitchPreviewEnabled,
+                onDismiss = { showSettings = false },
+                onSave = { range, toneCount, program, previewEnabled ->
+                    val nextRange = sanitizePlayableRange(range)
+                    val nextToneCount = sanitizeChordToneCount(toneCount)
+                    val nextProgram = sanitizeMidiProgramNumber(program)
+                    val shouldCreateNewPuzzle = nextRange != playableRange || nextToneCount != chordToneCount
+                    playableRange = nextRange
+                    chordToneCount = nextToneCount
+                    instrumentProgram = nextProgram
+                    keyPitchPreviewEnabled = previewEnabled
+                    settings.savePlayableRange(playableRange)
+                    settings.saveChordToneCount(chordToneCount)
+                    settings.saveInstrumentProgram(instrumentProgram)
+                    settings.saveKeyPitchPreviewEnabled(keyPitchPreviewEnabled)
+                    if (shouldCreateNewPuzzle) {
+                        game.newPuzzle(chordToneCount, playableRange)
+                    }
+                    showSettings = false
+                    if (audioStatus == AudioStatus.Ready) {
+                        scope.launch {
+                            playNotes(game.puzzle.notes, program = instrumentProgram, durationMillis = 1400)
+                        }
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -436,32 +558,31 @@ private fun ChordleHeader(
 @Composable
 private fun GameStatusLine(
     audioStatus: AudioStatus,
-    toneCount: Int,
-    noteRange: IntRange,
+    detailText: String,
     attempt: Int,
     maxAttempts: Int,
     onNewPuzzle: () -> Unit
 ) {
     val statusText = when (audioStatus) {
         AudioStatus.Loading -> "音色加载中"
-        AudioStatus.Ready -> "可播放"
+        AudioStatus.Ready -> null
         is AudioStatus.Error -> audioStatus.message
     }
     val statusColor = when (audioStatus) {
-        AudioStatus.Ready -> ChordleGreen
         AudioStatus.Loading -> ChordleYellow
         is AudioStatus.Error -> Color(0xFFE57373)
+        AudioStatus.Ready -> ChordleGreen
     }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(ChordleSurface)
-            .padding(horizontal = 18.dp, vertical = 7.dp),
+            .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "$toneCount 音 · ${rangeLabel(noteRange)}",
+            text = detailText,
             color = ChordleMuted,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
@@ -469,21 +590,24 @@ private fun GameStatusLine(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        Text(
-            text = statusText,
-            color = statusColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        if (statusText != null) {
+            Text(
+                text = statusText,
+                color = statusColor,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         Row(
             modifier = Modifier
-                .weight(1f)
                 .height(34.dp),
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -518,7 +642,8 @@ private fun BoardArea(
     game: ChordleGame,
     audioReady: Boolean,
     onPlayRow: (Int) -> Unit,
-    onPlayNote: (Int) -> Unit,
+    onPlayValue: (Int) -> Unit,
+    valueLabel: (Int) -> String,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(
@@ -557,9 +682,10 @@ private fun BoardArea(
                                     row == game.currentRow &&
                                     column == game.currentColumn,
                                 size = tileSize,
+                                valueLabel = valueLabel,
                                 onClick = game.cell(row, column).note
                                     ?.takeIf { audioReady }
-                                    ?.let { note -> { onPlayNote(note) } }
+                                    ?.let { value -> { onPlayValue(value) } }
                             )
                         }
                     }
@@ -589,6 +715,7 @@ private fun ChordTile(
     cell: GuessCell,
     active: Boolean,
     size: Dp,
+    valueLabel: (Int) -> String,
     onClick: (() -> Unit)?
 ) {
     val background = when (cell.state) {
@@ -613,7 +740,7 @@ private fun ChordTile(
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = cell.note?.let { noteLabel(it) }.orEmpty(),
+            text = cell.note?.let(valueLabel).orEmpty(),
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
@@ -713,6 +840,160 @@ private fun InputPanel(
             onNotePressed = onPreviewNote,
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+@Composable
+private fun OvertoneInputPanel(
+    game: ChordleGame,
+    overtoneRange: IntRange,
+    audioReady: Boolean,
+    onPlayChord: () -> Unit,
+    onPreviewMultiplier: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ChordleBackground)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = onPlayChord,
+                enabled = audioReady,
+                modifier = Modifier.weight(1.1f),
+                colors = ButtonDefaults.buttonColors(containerColor = ChordleGreen)
+            ) {
+                Text("▶ 播放和弦", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Surface(
+                modifier = Modifier.weight(1f),
+                color = ChordleSurface,
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    text = game.selectedNote?.let { "选中 ${it}x" } ?: "未选数字",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                    color = ChordleText,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    game.confirmSelectedValue(
+                        missingSelectionMessage = "先在数字键盘上选择一个数字"
+                    )
+                },
+                enabled = game.status == GameStatus.Playing,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("确认数字", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            OutlinedButton(
+                onClick = { game.deleteLast() },
+                enabled = game.status == GameStatus.Playing && game.currentColumn > 0,
+                modifier = Modifier.weight(0.72f)
+            ) {
+                Text("删除", maxLines = 1)
+            }
+            Button(
+                onClick = { game.submitGuess("数字") },
+                enabled = game.status == GameStatus.Playing && game.rowIsFull(game.currentRow),
+                modifier = Modifier.weight(0.85f),
+                colors = ButtonDefaults.buttonColors(containerColor = ChordleGray)
+            ) {
+                Text("提交", maxLines = 1)
+            }
+        }
+
+        if (game.status != GameStatus.Playing) {
+            Text(
+                text = if (game.status == GameStatus.Won) "已完成：${game.answerText}" else "答案：${game.answerText}",
+                color = ChordleMuted,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        OvertoneNumberPad(
+            multiplierRange = overtoneRange,
+            selectedMultiplier = game.selectedNote,
+            onMultiplierPressed = onPreviewMultiplier,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun OvertoneNumberPad(
+    multiplierRange: IntRange,
+    selectedMultiplier: Int?,
+    onMultiplierPressed: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val multipliers = remember(multiplierRange) { sanitizeOvertoneRange(multiplierRange).toList() }
+    val columns = if (multipliers.size <= 10) 5 else 8
+    val rows = remember(multipliers, columns) { multipliers.chunked(columns) }
+
+    Column(
+        modifier = modifier
+            .background(ChordleBackground)
+            .padding(top = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { multiplier ->
+                    val selected = multiplier == selectedMultiplier
+                    Button(
+                        onClick = { onMultiplierPressed(multiplier) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selected) ChordleGreen else ChordleSurface,
+                            contentColor = Color.White
+                        ),
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = multiplier.toString(),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip
+                        )
+                    }
+                }
+                repeat(columns - row.size) {
+                    Spacer(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -823,7 +1104,10 @@ private fun PianoKeyboard(
 }
 
 @Composable
-private fun HelpDialog(onDismiss: () -> Unit) {
+private fun HelpDialog(
+    mode: ChordleMode,
+    onDismiss: () -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -834,8 +1118,13 @@ private fun HelpDialog(onDismiss: () -> Unit) {
         title = { Text("Chordle") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("会按设置随机播放 1-10 个音，1 为单音测试。")
-                Text("从低到高选择钢琴键，逐个确认音符，填满一行后提交。")
+                if (mode == ChordleMode.Overtones) {
+                    Text("每局会随机选择一个基音，并从设置的整数区间生成倍频数组。")
+                    Text("可按任意顺序输入倍频数，提交后按从小到大的答案位置验证。")
+                } else {
+                    Text("会按设置随机播放 1-10 个音，1 为单音测试。")
+                    Text("可按任意顺序输入音符，提交后按从低到高的答案位置验证。")
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RuleChip(color = ChordleGreen)
                     Spacer(Modifier.width(8.dp))
@@ -899,8 +1188,65 @@ private fun findPianoNote(
     return whiteNotes.getOrNull(whiteIndex)
 }
 
+private data class PlaybackTone(
+    val key: Int,
+    val cents: Float = 0f
+)
+
+private fun valueLabelForMode(mode: ChordleMode): (Int) -> String {
+    return when (mode) {
+        ChordleMode.Overtones -> { value -> value.toString() }
+        ChordleMode.Normal,
+        ChordleMode.Extra -> ::noteLabel
+    }
+}
+
+private fun playbackTonesForMode(
+    mode: ChordleMode,
+    puzzle: ChordPuzzle,
+    values: List<Int>
+): List<PlaybackTone> {
+    return when (mode) {
+        ChordleMode.Overtones -> overtonePlaybackTones(puzzle, values)
+        ChordleMode.Normal,
+        ChordleMode.Extra -> values.map { PlaybackTone(key = it) }
+    }
+}
+
+private fun overtonePlaybackTones(puzzle: ChordPuzzle, multipliers: List<Int>): List<PlaybackTone> {
+    val baseMidiNote = puzzle.baseMidiNote ?: return emptyList()
+    return multipliers.map { multiplier -> overtonePlaybackTone(baseMidiNote, multiplier) }
+}
+
+private fun overtonePlaybackTone(baseMidiNote: Int, multiplier: Int): PlaybackTone {
+    val frequency = midiNoteFrequency(baseMidiNote) * multiplier
+    val midiValue = 69.0 + 12.0 * (ln(frequency / 440.0) / ln(2.0))
+    val key = midiValue.roundToInt().coerceIn(0, HighestPlayableMidiNote)
+    val cents = ((midiValue - key) * 100.0).toFloat()
+    return PlaybackTone(key = key, cents = cents)
+}
+
+private fun overtoneRangeLabel(range: IntRange): String {
+    val sanitized = sanitizeOvertoneRange(range)
+    return "${sanitized.first}-${sanitized.last}x"
+}
+
 private suspend fun playNotes(
     notes: List<Int>,
+    velocity: Int = 104,
+    program: Int = DefaultMidiProgramNumber,
+    durationMillis: Long = 1200
+) {
+    playTones(
+        tones = notes.map { PlaybackTone(key = it) },
+        velocity = velocity,
+        program = program,
+        durationMillis = durationMillis
+    )
+}
+
+private suspend fun playTones(
+    tones: List<PlaybackTone>,
     velocity: Int = 104,
     program: Int = DefaultMidiProgramNumber,
     durationMillis: Long = 1200
@@ -908,11 +1254,11 @@ private suspend fun playNotes(
     withContext(Dispatchers.Default) {
         val selectedProgram = sanitizeMidiProgramNumber(program)
         NativeAudioEngine.allSoundOff()
-        val noteIds = notes.mapNotNull { note ->
+        val noteIds = tones.mapNotNull { tone ->
             NativeAudioEngine.noteOn(
-                key = note,
+                key = tone.key,
                 velocity = velocity,
-                cents = 0f,
+                cents = tone.cents,
                 channel = 0,
                 program = selectedProgram,
                 bankMsb = 0,
@@ -951,6 +1297,33 @@ private class ChordleSettings(context: android.content.Context) {
             .apply()
     }
 
+    fun loadOvertoneRange(): IntRange {
+        val low = preferences.getInt(KEY_OVERTONE_LOW, DefaultOvertoneRange.first)
+        val high = preferences.getInt(KEY_OVERTONE_HIGH, DefaultOvertoneRange.last)
+        return sanitizeOvertoneRange(low..high)
+    }
+
+    fun saveOvertoneRange(range: IntRange) {
+        val sanitized = sanitizeOvertoneRange(range)
+        preferences.edit()
+            .putInt(KEY_OVERTONE_LOW, sanitized.first)
+            .putInt(KEY_OVERTONE_HIGH, sanitized.last)
+            .apply()
+    }
+
+    fun loadOvertoneToneCount(): Int {
+        return sanitizeOvertoneToneCount(
+            preferences.getInt(KEY_OVERTONE_TONE_COUNT, DefaultOvertoneToneCount),
+            loadOvertoneRange()
+        )
+    }
+
+    fun saveOvertoneToneCount(noteCount: Int, multiplierRange: IntRange = loadOvertoneRange()) {
+        preferences.edit()
+            .putInt(KEY_OVERTONE_TONE_COUNT, sanitizeOvertoneToneCount(noteCount, multiplierRange))
+            .apply()
+    }
+
     fun loadInstrumentProgram(): Int {
         return sanitizeMidiProgramNumber(preferences.getInt(KEY_INSTRUMENT_PROGRAM, DefaultMidiProgramNumber))
     }
@@ -961,12 +1334,45 @@ private class ChordleSettings(context: android.content.Context) {
             .apply()
     }
 
+    fun loadKeyPitchPreviewEnabled(): Boolean {
+        return preferences.getBoolean(KEY_KEY_PITCH_PREVIEW_ENABLED, DefaultKeyPitchPreviewEnabled)
+    }
+
+    fun saveKeyPitchPreviewEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_KEY_PITCH_PREVIEW_ENABLED, enabled)
+            .apply()
+    }
+
     private companion object {
         const val KEY_LOW = "playable_range_low"
         const val KEY_HIGH = "playable_range_high"
         const val KEY_TONE_COUNT = "chord_tone_count"
+        const val KEY_OVERTONE_LOW = "overtone_range_low"
+        const val KEY_OVERTONE_HIGH = "overtone_range_high"
+        const val KEY_OVERTONE_TONE_COUNT = "overtone_tone_count"
         const val KEY_INSTRUMENT_PROGRAM = "instrument_program"
+        const val KEY_KEY_PITCH_PREVIEW_ENABLED = "key_pitch_preview_enabled"
     }
+}
+
+@Composable
+private fun DiscreteIntRangeSlider(
+    value: IntRange,
+    onValueChange: (IntRange) -> Unit,
+    valueRange: IntRange,
+    steps: Int,
+    modifier: Modifier = Modifier
+) {
+    RangeSlider(
+        value = value.first.toFloat()..value.last.toFloat(),
+        onValueChange = { selectedRange ->
+            onValueChange(selectedRange.start.roundToInt()..selectedRange.endInclusive.roundToInt())
+        },
+        modifier = modifier,
+        valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
+        steps = steps.coerceAtLeast(0)
+    )
 }
 
 @Composable
@@ -974,8 +1380,9 @@ private fun RangeSettingsDialog(
     range: IntRange,
     chordToneCount: Int,
     instrumentProgram: Int,
+    keyPitchPreviewEnabled: Boolean,
     onDismiss: () -> Unit,
-    onSave: (IntRange, Int, Int) -> Unit
+    onSave: (IntRange, Int, Int, Boolean) -> Unit
 ) {
     var low by remember(range) { mutableFloatStateOf(range.first.toFloat()) }
     var high by remember(range) { mutableFloatStateOf(range.last.toFloat()) }
@@ -983,6 +1390,7 @@ private fun RangeSettingsDialog(
     var program by remember(instrumentProgram) {
         mutableFloatStateOf(sanitizeMidiProgramNumber(instrumentProgram).toFloat())
     }
+    var previewEnabled by remember(keyPitchPreviewEnabled) { mutableStateOf(keyPitchPreviewEnabled) }
 
     fun currentRange(): IntRange {
         return sanitizePlayableRange(low.toInt()..high.toInt())
@@ -995,7 +1403,7 @@ private fun RangeSettingsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = { onSave(currentRange(), toneCount.toInt(), currentProgram()) }) {
+            TextButton(onClick = { onSave(currentRange(), toneCount.toInt(), currentProgram(), previewEnabled) }) {
                 Text("保存")
             }
         },
@@ -1035,29 +1443,24 @@ private fun RangeSettingsDialog(
                     valueRange = MinMidiProgramNumber.toFloat()..MaxMidiProgramNumber.toFloat(),
                     steps = MaxMidiProgramNumber - MinMidiProgramNumber - 1
                 )
-                Text("最低音：${noteLabel(sanitized.first)}", fontWeight = FontWeight.Bold)
-                Slider(
-                    value = low,
-                    onValueChange = { value ->
-                        low = value.coerceIn(
-                            LowestPlayableMidiNote.toFloat(),
-                            (high.toInt() - MinimumPlayableRangeSemitones).coerceAtLeast(LowestPlayableMidiNote).toFloat()
-                        )
-                    },
-                    valueRange = LowestPlayableMidiNote.toFloat()..(HighestPlayableMidiNote - MinimumPlayableRangeSemitones).toFloat(),
-                    steps = HighestPlayableMidiNote - LowestPlayableMidiNote - MinimumPlayableRangeSemitones - 1
+                SettingSwitchRow(
+                    text = "选择按键时预听音高",
+                    checked = previewEnabled,
+                    onCheckedChange = { previewEnabled = it }
                 )
-                Text("最高音：${noteLabel(sanitized.last)}", fontWeight = FontWeight.Bold)
-                Slider(
-                    value = high,
+                Text(
+                    "音域两端：${noteLabel(sanitized.first)} / ${noteLabel(sanitized.last)}",
+                    fontWeight = FontWeight.Bold
+                )
+                DiscreteIntRangeSlider(
+                    value = sanitized,
                     onValueChange = { value ->
-                        high = value.coerceIn(
-                            (low.toInt() + MinimumPlayableRangeSemitones).coerceAtMost(HighestPlayableMidiNote).toFloat(),
-                            HighestPlayableMidiNote.toFloat()
-                        )
+                        val nextRange = sanitizePlayableRange(value)
+                        low = nextRange.first.toFloat()
+                        high = nextRange.last.toFloat()
                     },
-                    valueRange = (LowestPlayableMidiNote + MinimumPlayableRangeSemitones).toFloat()..HighestPlayableMidiNote.toFloat(),
-                    steps = HighestPlayableMidiNote - LowestPlayableMidiNote - MinimumPlayableRangeSemitones - 1
+                    valueRange = LowestPlayableMidiNote..HighestPlayableMidiNote,
+                    steps = HighestPlayableMidiNote - LowestPlayableMidiNote - 1
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
@@ -1066,6 +1469,7 @@ private fun RangeSettingsDialog(
                             high = DefaultPlayableRange.last.toFloat()
                             toneCount = DefaultChordToneCount.toFloat()
                             program = DefaultMidiProgramNumber.toFloat()
+                            previewEnabled = DefaultKeyPitchPreviewEnabled
                         },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -1089,7 +1493,169 @@ private fun RangeSettingsDialog(
     )
 }
 
+@Composable
+private fun OvertoneSettingsDialog(
+    multiplierRange: IntRange,
+    toneCount: Int,
+    instrumentProgram: Int,
+    keyPitchPreviewEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (IntRange, Int, Int, Boolean) -> Unit
+) {
+    val initialRange = sanitizeOvertoneRange(multiplierRange)
+    var low by remember(initialRange) { mutableFloatStateOf(initialRange.first.toFloat()) }
+    var high by remember(initialRange) { mutableFloatStateOf(initialRange.last.toFloat()) }
+    var selectedToneCount by remember(toneCount, initialRange) {
+        mutableFloatStateOf(sanitizeOvertoneToneCount(toneCount, initialRange).toFloat())
+    }
+    var program by remember(instrumentProgram) {
+        mutableFloatStateOf(sanitizeMidiProgramNumber(instrumentProgram).toFloat())
+    }
+    var previewEnabled by remember(keyPitchPreviewEnabled) { mutableStateOf(keyPitchPreviewEnabled) }
+
+    fun currentRange(): IntRange {
+        return sanitizeOvertoneRange(low.toInt()..high.toInt())
+    }
+
+    fun currentToneCount(): Int {
+        return sanitizeOvertoneToneCount(selectedToneCount.toInt(), currentRange())
+    }
+
+    fun currentProgram(): Int {
+        return sanitizeMidiProgramNumber(program.toInt())
+    }
+
+    fun applyRange(nextRange: IntRange) {
+        val sanitized = sanitizeOvertoneRange(nextRange)
+        low = sanitized.first.toFloat()
+        high = sanitized.last.toFloat()
+        selectedToneCount = sanitizeOvertoneToneCount(selectedToneCount.toInt(), sanitized).toFloat()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { onSave(currentRange(), currentToneCount(), currentProgram(), previewEnabled) }) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+        title = { Text("Overtones 设置") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                val sanitized = currentRange()
+                val toneMax = maxOvertoneToneCount(sanitized)
+                Text("倍音范围：${overtoneRangeLabel(sanitized)}")
+                Text(
+                    text = "可选 1-31 内的正整数子区间；最高值至少为最低值的 2 倍，区间端点会包含在内。",
+                    fontSize = 14.sp,
+                    color = Color(0xFF6E5D75)
+                )
+                Text(
+                    text = "音的个数：${currentToneCount()}（最多 $toneMax）",
+                    fontWeight = FontWeight.Bold
+                )
+                if (toneMax > MinOvertoneToneCount) {
+                    Slider(
+                        value = currentToneCount().toFloat(),
+                        onValueChange = { value ->
+                            selectedToneCount = sanitizeOvertoneToneCount(value.toInt(), sanitized).toFloat()
+                        },
+                        valueRange = MinOvertoneToneCount.toFloat()..toneMax.toFloat(),
+                        steps = (toneMax - MinOvertoneToneCount - 1).coerceAtLeast(0)
+                    )
+                }
+                Text("音色（MIDI program number）：${currentProgram()}", fontWeight = FontWeight.Bold)
+                Slider(
+                    value = program,
+                    onValueChange = { value ->
+                        program = sanitizeMidiProgramNumber(value.toInt()).toFloat()
+                    },
+                    valueRange = MinMidiProgramNumber.toFloat()..MaxMidiProgramNumber.toFloat(),
+                    steps = MaxMidiProgramNumber - MinMidiProgramNumber - 1
+                )
+                SettingSwitchRow(
+                    text = "选择按键时预听音高",
+                    checked = previewEnabled,
+                    onCheckedChange = { previewEnabled = it }
+                )
+                Text(
+                    "倍频两端：${sanitized.first}x / ${sanitized.last}x",
+                    fontWeight = FontWeight.Bold
+                )
+                DiscreteIntRangeSlider(
+                    value = sanitized,
+                    onValueChange = ::applyRange,
+                    valueRange = MinOvertoneMultiplier..MaxOvertoneMultiplier,
+                    steps = MaxOvertoneMultiplier - MinOvertoneMultiplier - 1
+                )
+                Text(
+                    text = "每局会按最高倍频限制随机基音，保证播放的最高频率不超过 C8。",
+                    fontSize = 14.sp,
+                    color = Color(0xFF6E5D75)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            low = DefaultOvertoneRange.first.toFloat()
+                            high = DefaultOvertoneRange.last.toFloat()
+                            selectedToneCount = DefaultOvertoneToneCount.toFloat()
+                            program = DefaultMidiProgramNumber.toFloat()
+                            previewEnabled = DefaultKeyPitchPreviewEnabled
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("默认")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            applyRange(MinOvertoneMultiplier..MaxOvertoneMultiplier)
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("全范围")
+                    }
+                }
+            }
+        },
+        containerColor = Color(0xFFF8F0F8),
+        titleContentColor = Color(0xFF4E4156),
+        textContentColor = Color(0xFF4E4156)
+    )
+}
+
+@Composable
+private fun SettingSwitchRow(
+    text: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            fontWeight = FontWeight.Bold
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
 private val PianoRange = FullPianoRange
+private const val DefaultKeyPitchPreviewEnabled = false
 private val ChordleBackground = Color(0xFF121213)
 private val ChordleSurface = Color(0xFF1A1A1B)
 private val ChordleText = Color(0xFFF8F8F8)

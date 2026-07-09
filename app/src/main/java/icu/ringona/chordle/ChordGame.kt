@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlin.math.pow
 import kotlin.random.Random
 
 private val pitchNames = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
@@ -18,8 +19,14 @@ const val DefaultChordToneCount = 3
 const val MinMidiProgramNumber = 0
 const val MaxMidiProgramNumber = 127
 const val DefaultMidiProgramNumber = 0
+const val MinOvertoneMultiplier = 1
+const val MaxOvertoneMultiplier = 31
+const val MinOvertoneToneCount = 2
+const val MaxOvertoneToneCount = 10
+const val DefaultOvertoneToneCount = 4
 val DefaultPlayableRange = 48..72
 val FullPianoRange = LowestPlayableMidiNote..HighestPlayableMidiNote
+val DefaultOvertoneRange = 8..16
 
 enum class TileState {
     Empty,
@@ -42,7 +49,9 @@ data class GuessCell(
 
 data class ChordPuzzle(
     val notes: List<Int>,
-    val label: String
+    val label: String,
+    val answerLabel: String = notes.joinToString("  ") { noteLabel(it) },
+    val baseMidiNote: Int? = null
 ) {
     companion object {
         fun random(noteCount: Int = DefaultChordToneCount, noteRange: IntRange = DefaultPlayableRange): ChordPuzzle {
@@ -59,6 +68,25 @@ data class ChordPuzzle(
                 "${notes.size}-tone"
             }
             return ChordPuzzle(notes = notes, label = label)
+        }
+
+        fun randomOvertones(
+            toneCount: Int = DefaultOvertoneToneCount,
+            multiplierRange: IntRange = DefaultOvertoneRange
+        ): ChordPuzzle {
+            val overtoneRange = sanitizeOvertoneRange(multiplierRange)
+            val sanitizedCount = sanitizeOvertoneToneCount(toneCount, overtoneRange)
+            val multipliers = overtoneRange.toList()
+                .shuffled()
+                .take(sanitizedCount)
+                .sorted()
+            val baseMidiNote = randomOvertoneBaseMidiNote(overtoneRange)
+            return ChordPuzzle(
+                notes = multipliers,
+                label = "${noteLabel(baseMidiNote)} · ${overtoneRange.first}-${overtoneRange.last}x",
+                answerLabel = multipliers.joinToString("  "),
+                baseMidiNote = baseMidiNote
+            )
         }
     }
 }
@@ -91,7 +119,7 @@ class ChordleGame(
         get() = puzzle.notes.size
 
     val answerText: String
-        get() = puzzle.notes.joinToString("  ") { noteLabel(it) }
+        get() = puzzle.answerLabel
 
     init {
         rebuildCells()
@@ -102,20 +130,23 @@ class ChordleGame(
     }
 
     fun confirmSelectedNote() {
+        confirmSelectedValue(
+            missingSelectionMessage = "先在钢琴上选择一个音"
+        )
+    }
+
+    fun confirmSelectedValue(
+        missingSelectionMessage: String
+    ) {
         if (status != GameStatus.Playing) {
             return
         }
         val note = selectedNote ?: run {
-            message = "先在钢琴上选择一个音"
+            message = missingSelectionMessage
             return
         }
         if (currentColumn >= columns) {
             message = "这一行已经填满"
-            return
-        }
-        val previous = if (currentColumn > 0) cell(currentRow, currentColumn - 1).note else null
-        if (previous != null && note <= previous) {
-            message = "请按从低到高确认音符"
             return
         }
         setCell(currentRow, currentColumn, GuessCell(note, TileState.Input))
@@ -130,13 +161,13 @@ class ChordleGame(
         setCell(currentRow, currentColumn, GuessCell())
     }
 
-    fun submitGuess() {
+    fun submitGuess(itemName: String = "音") {
         if (status != GameStatus.Playing) {
             return
         }
         val guess = rowNotes(currentRow)
         if (guess.size != columns) {
-            message = "请先确认全部 ${columns} 个音"
+            message = "请先确认全部 ${columns} 个$itemName"
             return
         }
         val result = evaluateGuess(guess, puzzle.notes)
@@ -162,7 +193,11 @@ class ChordleGame(
     }
 
     fun newPuzzle(noteCount: Int = columns, noteRange: IntRange = DefaultPlayableRange) {
-        puzzle = ChordPuzzle.random(sanitizeChordToneCount(noteCount), noteRange)
+        newPuzzle(ChordPuzzle.random(sanitizeChordToneCount(noteCount), noteRange))
+    }
+
+    fun newPuzzle(nextPuzzle: ChordPuzzle) {
+        puzzle = nextPuzzle
         currentRow = 0
         currentColumn = 0
         selectedNote = null
@@ -253,6 +288,70 @@ fun sanitizeChordToneCount(noteCount: Int): Int {
 
 fun sanitizeMidiProgramNumber(program: Int): Int {
     return program.coerceIn(MinMidiProgramNumber, MaxMidiProgramNumber)
+}
+
+fun sanitizeOvertoneRange(range: IntRange): IntRange {
+    var low = range.first.coerceIn(MinOvertoneMultiplier, MaxOvertoneMultiplier / 2)
+    var high = range.last.coerceIn(MinOvertoneMultiplier, MaxOvertoneMultiplier)
+    val requiredHigh = maxOf(low * 2, low + MinOvertoneToneCount)
+
+    if (high < requiredHigh) {
+        high = requiredHigh
+    }
+    if (high > MaxOvertoneMultiplier) {
+        high = MaxOvertoneMultiplier
+        low = low
+            .coerceAtMost(high / 2)
+            .coerceAtMost(high - MinOvertoneToneCount)
+            .coerceAtLeast(MinOvertoneMultiplier)
+    }
+
+    return low..high
+}
+
+fun maxOvertoneToneCount(multiplierRange: IntRange): Int {
+    val sanitized = sanitizeOvertoneRange(multiplierRange)
+    return minOf(MaxOvertoneToneCount, sanitized.last - sanitized.first)
+        .coerceAtLeast(MinOvertoneToneCount)
+}
+
+fun sanitizeOvertoneToneCount(noteCount: Int, multiplierRange: IntRange): Int {
+    return noteCount.coerceIn(MinOvertoneToneCount, maxOvertoneToneCount(multiplierRange))
+}
+
+fun midiNoteFrequency(midiNote: Int): Double {
+    return 440.0 * 2.0.pow((midiNote - 69) / 12.0)
+}
+
+fun randomOvertoneBaseMidiNote(
+    multiplierRange: IntRange,
+    random: Random = Random.Default
+): Int {
+    val candidates = overtoneBaseCandidates(multiplierRange)
+    val totalWeight = candidates.indices.sumOf { index ->
+        overtoneBaseCandidateWeight(index, candidates.size)
+    }
+    var ticket = random.nextInt(totalWeight)
+    candidates.forEachIndexed { index, midiNote ->
+        ticket -= overtoneBaseCandidateWeight(index, candidates.size)
+        if (ticket < 0) {
+            return midiNote
+        }
+    }
+    return candidates.first()
+}
+
+fun overtoneBaseCandidates(multiplierRange: IntRange): List<Int> {
+    val sanitized = sanitizeOvertoneRange(multiplierRange)
+    val highestFrequency = midiNoteFrequency(HighestPlayableMidiNote)
+    return FullPianoRange.filter { midiNote ->
+        midiNoteFrequency(midiNote) * sanitized.last <= highestFrequency + 0.000001
+    }
+}
+
+fun overtoneBaseCandidateWeight(index: Int, candidateCount: Int): Int {
+    val lowBias = (candidateCount - index).coerceAtLeast(1)
+    return lowBias * lowBias
 }
 
 fun isBlackKey(midiNote: Int): Boolean {
