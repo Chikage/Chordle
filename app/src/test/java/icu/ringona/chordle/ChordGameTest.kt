@@ -106,9 +106,82 @@ class ChordGameTest {
     }
 
     @Test
-    fun extraStepTileLabelUsesTwoLinesForNonCSteps() {
+    fun extraStepTileLabelUsesPotdPitchNames() {
         assertEquals("C3", extraStepTileLabel(96, 24))
-        assertEquals("C3\n+7\\24", extraStepTileLabel(103, 24))
+        assertEquals("dE3", extraStepTileLabel(103, 24))
+        assertEquals("B4", extraStepTileLabel(49 + 53 * 5, 53))
+        assertEquals("B4", extraStepLabel(49 + 53 * 5, 53))
+    }
+
+    @Test
+    fun extraStepLabelUsesSimpleDiatonicNamesForSevenEdo() {
+        val labels = (0..6).map { step -> extraStepLabel(step + 7 * 5, 7) }
+
+        assertEquals(listOf("C4", "D4", "E4", "F4", "G4", "A4", "B4"), labels)
+    }
+
+    @Test
+    fun extraStepLabelUsesRaisedDiatonicNamesForFourteenEdo() {
+        val labels = (0..13).map { step -> extraStepLabel(step + 14 * 5, 14) }
+
+        assertEquals(
+            listOf("C4", "^C4", "D4", "^D4", "E4", "^E4", "F4", "^F4", "G4", "^G4", "A4", "^A4", "B4", "^B4"),
+            labels
+        )
+    }
+
+    @Test
+    fun extraStepLabelUsesThirdToneDiatonicNamesForTwentyOneEdo() {
+        val labels = (0..20).map { step -> extraStepLabel(step + 21 * 5, 21) }
+
+        assertEquals(
+            listOf(
+                "C4", "^C4", "vD4",
+                "D4", "^D4", "vE4",
+                "E4", "^E4", "vF4",
+                "F4", "^F4", "vG4",
+                "G4", "^G4", "vA4",
+                "A4", "^A4", "vB4",
+                "B4", "^B4", "vC4"
+            ),
+            labels
+        )
+    }
+
+    @Test
+    fun extraStepLabelUsesQuarterToneDiatonicNamesForTwentyEightEdo() {
+        val labels = (0..27).map { step -> extraStepLabel(step + 28 * 5, 28) }
+
+        assertEquals(
+            listOf(
+                "C4", "^C4", "^^C4", "vD4",
+                "D4", "^D4", "^^D4", "vE4",
+                "E4", "^E4", "^^E4", "vF4",
+                "F4", "^F4", "^^F4", "vG4",
+                "G4", "^G4", "^^G4", "vA4",
+                "A4", "^A4", "^^A4", "vB4",
+                "B4", "^B4", "^^B4", "vC4"
+            ),
+            labels
+        )
+    }
+
+    @Test
+    fun extraStepLabelUsesFifthToneDiatonicNamesForThirtyFiveEdo() {
+        val labels = (0..34).map { step -> extraStepLabel(step + 35 * 5, 35) }
+
+        assertEquals(
+            listOf(
+                "C4", "^C4", "^^C4", "vvD4", "vD4",
+                "D4", "^D4", "^^D4", "vvE4", "vE4",
+                "E4", "^E4", "^^E4", "vvF4", "vF4",
+                "F4", "^F4", "^^F4", "vvG4", "vG4",
+                "G4", "^G4", "^^G4", "vvA4", "vA4",
+                "A4", "^A4", "^^A4", "vvB4", "vB4",
+                "B4", "^B4", "^^B4", "vvC4", "vC4"
+            ),
+            labels
+        )
     }
 
     @Test

@@ -8,10 +8,52 @@ import androidx.compose.runtime.setValue
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.log2
 import kotlin.math.pow
 import kotlin.random.Random
 
 private val pitchNames = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+private val extraPitchNames = mapOf(
+    '1' to "C",
+    '2' to "D",
+    '3' to "E",
+    '4' to "F",
+    '5' to "G",
+    '6' to "A",
+    '7' to "B"
+)
+private val simpleExtraPitchNameTables = mapOf(
+    7 to listOf("C", "D", "E", "F", "G", "A", "B"),
+    14 to listOf("C", "^C", "D", "^D", "E", "^E", "F", "^F", "G", "^G", "A", "^A", "B", "^B"),
+    21 to listOf(
+        "C", "^C", "vD",
+        "D", "^D", "vE",
+        "E", "^E", "vF",
+        "F", "^F", "vG",
+        "G", "^G", "vA",
+        "A", "^A", "vB",
+        "B", "^B", "vC"
+    ),
+    28 to listOf(
+        "C", "^C", "^^C", "vD",
+        "D", "^D", "^^D", "vE",
+        "E", "^E", "^^E", "vF",
+        "F", "^F", "^^F", "vG",
+        "G", "^G", "^^G", "vA",
+        "A", "^A", "^^A", "vB",
+        "B", "^B", "^^B", "vC"
+    ),
+    35 to listOf(
+        "C", "^C", "^^C", "vvD", "vD",
+        "D", "^D", "^^D", "vvE", "vE",
+        "E", "^E", "^^E", "vvF", "vF",
+        "F", "^F", "^^F", "vvG", "vG",
+        "G", "^G", "^^G", "vvA", "vA",
+        "A", "^A", "^^A", "vvB", "vB",
+        "B", "^B", "^^B", "vvC", "vC"
+    )
+)
+private val extraPitchNameTableCache = mutableMapOf<Int, List<ExtraPitchName?>>()
 
 const val LowestPlayableMidiNote = 21
 const val HighestPlayableMidiNote = 108
@@ -455,8 +497,28 @@ fun midiValueForExtraStep(step: Int, edo: Int): Double {
 
 fun extraStepLabel(step: Int, edo: Int): String {
     val normalizedEdo = sanitizeExtraEdo(edo)
-    val octave = step / normalizedEdo - 1
+    val octave = Math.floorDiv(step, normalizedEdo) - 1
     val octaveStep = step.floorMod(normalizedEdo)
+    return extraPitchName(octaveStep, normalizedEdo)
+        ?.let { pitch -> "${pitch.name}${octave + pitch.octaveOffset}" }
+        ?: legacyExtraStepLabel(octave, octaveStep)
+}
+
+fun extraStepTileLabel(step: Int, edo: Int): String {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    val octave = Math.floorDiv(step, normalizedEdo) - 1
+    val octaveStep = step.floorMod(normalizedEdo)
+    return extraPitchName(octaveStep, normalizedEdo)
+        ?.let { pitch -> "${pitch.name}${octave + pitch.octaveOffset}" }
+        ?: legacyExtraStepTileLabel(octave, octaveStep, normalizedEdo)
+}
+
+private data class ExtraPitchName(
+    val name: String,
+    val octaveOffset: Int
+)
+
+private fun legacyExtraStepLabel(octave: Int, octaveStep: Int): String {
     return if (octaveStep == 0) {
         "C$octave"
     } else {
@@ -464,14 +526,226 @@ fun extraStepLabel(step: Int, edo: Int): String {
     }
 }
 
-fun extraStepTileLabel(step: Int, edo: Int): String {
-    val normalizedEdo = sanitizeExtraEdo(edo)
-    val octave = step / normalizedEdo - 1
-    val octaveStep = step.floorMod(normalizedEdo)
+private fun legacyExtraStepTileLabel(octave: Int, octaveStep: Int, edo: Int): String {
     return if (octaveStep == 0) {
         "C$octave"
     } else {
-        "C$octave\n+$octaveStep\\$normalizedEdo"
+        "C$octave\n+$octaveStep\\$edo"
+    }
+}
+
+private fun extraPitchName(octaveStep: Int, edo: Int): ExtraPitchName? {
+    return extraPitchNameTable(edo).getOrNull(octaveStep)
+}
+
+private fun extraPitchNameTable(edo: Int): List<ExtraPitchName?> {
+    return extraPitchNameTableCache.getOrPut(edo) {
+        simpleExtraPitchNameTables[edo]?.let { names ->
+            names.map { pitch ->
+                ExtraPitchName(name = pitch, octaveOffset = 0)
+            }
+        } ?: run {
+            List(edo) { octaveStep ->
+                potdNumericName(octaveStep, edo)?.toExtraPitchName()
+            }
+        }
+    }
+}
+
+private fun String.toExtraPitchName(): ExtraPitchName? {
+    var octaveOffset = 0
+    var index = 0
+    while (index < length) {
+        when (this[index]) {
+            '\'' -> octaveOffset += 1
+            '`' -> octaveOffset -= 1
+            else -> break
+        }
+        index += 1
+    }
+    val body = drop(index)
+    val degree = body.lastOrNull() ?: return null
+    val pitch = extraPitchNames[degree] ?: return null
+    val accidental = body.dropLast(1)
+    return ExtraPitchName(name = "$accidental$pitch", octaveOffset = octaveOffset)
+}
+
+private fun potdNumericName(step: Int, edo: Int): String? {
+    if (edo <= 0) {
+        return null
+    }
+    val oc = edo
+    val tr = (edo * log2(3.0)).roundHalfToEven()
+    val hp = (edo * log2(7.0)).roundHalfToEven()
+    val ded = 2 * tr - 3 * oc
+    val xed = 8 * oc - 5 * tr
+    val zid = 7 * tr - 11 * oc
+    val maxStep = maxOf(ded, xed)
+
+    val mav: Int
+    val neu: Map<String, Int>
+    val neuj: Map<String, Int>
+    val fls: Map<String, Int>
+    if (xed > 0) {
+        mav = maxOf(3 * oc - hp - xed, maxStep.floorDiv(2))
+        neu = linkedMapOf(
+            "1" to 0,
+            "2" to ded,
+            "3" to 2 * ded,
+            "4" to 2 * ded + xed,
+            "5" to 3 * ded + xed,
+            "6" to edo - ded - xed,
+            "7" to edo - xed
+        )
+        neuj = mapOf(
+            "1" to ded,
+            "2" to ded,
+            "3" to xed,
+            "4" to ded,
+            "5" to ded,
+            "6" to ded,
+            "7" to xed
+        )
+        fls = mapOf("1" to 0, "2" to 0, "3" to 0, "4" to 0, "5" to 0, "6" to 0, "7" to 1)
+    } else {
+        mav = maxOf(3 * oc - hp - (xed + ded), maxStep.floorDiv(2))
+        neu = linkedMapOf(
+            "1" to 0,
+            "2" to ded,
+            "3" to 2 * ded,
+            "5" to 3 * ded + xed,
+            "6" to edo - ded - xed
+        )
+        neuj = mapOf(
+            "1" to ded,
+            "2" to ded,
+            "3" to xed + ded,
+            "5" to ded,
+            "6" to ded + xed
+        )
+        fls = mapOf("1" to 0, "2" to 0, "3" to 0, "5" to 0, "6" to 1)
+    }
+
+    var namePrefix = ""
+    var degree: String? = null
+    var cha = edo
+    var rec: String? = null
+    for ((name, position) in neu) {
+        if (position == step) {
+            degree = name
+            cha = 0
+            break
+        }
+        val distance = step - position
+        if (distance in 1 until cha) {
+            rec = name
+            cha = distance
+        }
+    }
+    if (degree == null) {
+        val record = rec ?: return null
+        val zcha = neuj[record] ?: return null
+        val ycha = zcha - cha
+        val condition = if (zcha == maxStep) {
+            ycha <= mav
+        } else {
+            ycha <= mav + (zcha - maxStep).floorDiv(2)
+        }
+        if (condition) {
+            cha = -ycha
+            if (fls[record] == 1) {
+                degree = "1"
+                namePrefix = "'"
+            } else {
+                degree = nextExtraDegree(record, neuj)
+            }
+        } else {
+            degree = record
+        }
+    }
+
+    val accidental = potdAccidental(cha, zid, xed) ?: return null
+    return "$namePrefix$accidental$degree"
+}
+
+private fun nextExtraDegree(degree: String, neuj: Map<String, Int>): String {
+    val next = degree.toInt() + 1
+    return if (next.toString() in neuj) {
+        next.toString()
+    } else {
+        (next + 1).toString()
+    }
+}
+
+private fun potdAccidental(cha: Int, zid: Int, xed: Int): String? {
+    if (xed <= 0) {
+        return if (cha >= 0) "^".repeat(cha) else "v".repeat(-cha)
+    }
+    if (zid == 0) {
+        return null
+    }
+    return if (zid.floorMod(2) == 1) {
+        val zzha = roundRatioHalfToEven(cha, zid)
+        val yzha = cha - zzha * zid
+        extraUpDown(yzha) + extraSharpFlat(zzha)
+    } else {
+        val zzha = roundRatioHalfToEven(2 * cha, zid)
+        val yzha = cha - zzha * (zid / 2)
+        extraUpDown(yzha) + extraHalfSharpFlat(zzha)
+    }
+}
+
+private fun extraSharpFlat(amount: Int): String {
+    if (amount <= 0) {
+        return "b".repeat(-amount)
+    }
+    return "#".repeat(amount.floorMod(2)) + "x".repeat(amount / 2)
+}
+
+private fun extraHalfSharpFlat(twiceAmount: Int): String {
+    if (twiceAmount <= 0) {
+        val amount = -twiceAmount
+        return "d".repeat(amount.floorMod(2)) + "b".repeat(amount / 2)
+    }
+    return "#".repeat(if (twiceAmount.floorMod(4) >= 2) 1 else 0) +
+        "+".repeat(twiceAmount.floorMod(2)) +
+        "x".repeat(twiceAmount / 4)
+}
+
+private fun extraUpDown(amount: Int): String {
+    return if (amount <= 0) {
+        "v".repeat(-amount)
+    } else {
+        "^".repeat(amount)
+    }
+}
+
+private fun roundRatioHalfToEven(numerator: Int, denominator: Int): Int {
+    var n = numerator
+    var d = denominator
+    if (d < 0) {
+        n = -n
+        d = -d
+    }
+    val floor = Math.floorDiv(n, d)
+    val remainder = n - floor * d
+    val twice = remainder * 2
+    return when {
+        twice < d -> floor
+        twice > d -> floor + 1
+        floor.floorMod(2) == 0 -> floor
+        else -> floor + 1
+    }
+}
+
+private fun Double.roundHalfToEven(): Int {
+    val floorValue = floor(this).toInt()
+    val remainder = this - floorValue
+    return when {
+        remainder < 0.5 -> floorValue
+        remainder > 0.5 -> floorValue + 1
+        floorValue.floorMod(2) == 0 -> floorValue
+        else -> floorValue + 1
     }
 }
 

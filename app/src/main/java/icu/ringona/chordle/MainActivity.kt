@@ -1367,7 +1367,7 @@ private fun MicrotonalKeyboard(
                                 labelPaint
                             )
                         }
-                    } else if (marker == SecondaryExtraEdoMark) {
+                    } else if (shouldDrawMicrotonalStepLabel(normalizedEdo, marker)) {
                         drawIntoCanvas { canvas ->
                             labelPaint.color = android.graphics.Color.argb(144, 255, 222, 111)
                             labelPaint.textSize = 8.sp.toPx()
@@ -1420,20 +1420,43 @@ private fun HelpDialog(
                     Text("会按设置随机播放 1-10 个音，1 为单音测试。")
                     Text("可按任意顺序输入音符，提交后按从低到高的答案位置验证。")
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RuleChip(color = ChordleGreen)
-                    Spacer(Modifier.width(8.dp))
-                    Text("绿色：音高和位置都正确")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RuleChip(color = ChordleYellow)
-                    Spacer(Modifier.width(8.dp))
-                    Text("黄色：有这个音，但位置不对")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RuleChip(color = ChordleGray)
-                    Spacer(Modifier.width(8.dp))
-                    Text("灰色：和弦里没有这个音")
+                if (mode == ChordleMode.Extra) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ChordleGreen)
+                        Spacer(Modifier.width(8.dp))
+                        Text("绿色：该位置音高完全正确，全绿才胜利")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ExtraCorrectBlue)
+                        Spacer(Modifier.width(8.dp))
+                        Text("淡蓝：该位置音高误差在 50 音分内")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ExtraNearPink)
+                        Spacer(Modifier.width(8.dp))
+                        Text("淡粉：和弦内有 50 音分内的音，但位置不对")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ChordleGray)
+                        Spacer(Modifier.width(8.dp))
+                        Text("灰色：和弦里没有 50 音分内的音")
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ChordleGreen)
+                        Spacer(Modifier.width(8.dp))
+                        Text("绿色：音高和位置都正确")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ChordleYellow)
+                        Spacer(Modifier.width(8.dp))
+                        Text("黄色：有这个音，但位置不对")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RuleChip(color = ChordleGray)
+                        Spacer(Modifier.width(8.dp))
+                        Text("灰色：和弦里没有这个音")
+                    }
                 }
             }
         },
@@ -2169,6 +2192,12 @@ private fun edoMarkerForStep(edo: Int, octaveStep: Int): Char {
     return pattern.getOrNull(octaveStep) ?: HiddenExtraEdoMark
 }
 
+private fun shouldDrawMicrotonalStepLabel(edo: Int, marker: Char): Boolean {
+    val normalizedEdo = sanitizeExtraEdo(edo)
+    return marker == SecondaryExtraEdoMark ||
+        (normalizedEdo == 53 && marker == TertiaryExtraEdoMark)
+}
+
 private fun denseLineVisibilityRatio(
     stepIndex: Int,
     step: Double,
@@ -2220,6 +2249,7 @@ private val PianoRange = FullPianoRange
 private const val DefaultKeyPitchPreviewEnabled = false
 private const val HiddenExtraEdoMark = 'N'
 private const val SecondaryExtraEdoMark = '1'
+private const val TertiaryExtraEdoMark = '2'
 private const val MicrotonalKeyboardMinTickSpacingPx = 1.1f
 private const val MicrotonalCTickHeightRatio = 0.84f
 private const val MicrotonalCTickAlpha = 184
