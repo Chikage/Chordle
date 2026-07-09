@@ -1614,11 +1614,33 @@ private fun MicrotonalKeyboard(
                     val alpha = (MicrotonalCTickAlpha * ratio).roundToInt().coerceIn(0, MicrotonalCTickAlpha)
                     val stateColor = valueStateControlColor(valueStates[step])
                     val strokeWidth = if (isC) 1.4.dp.toPx() else 1.dp.toPx()
+                    if (stateColor != null) {
+                        val bandWidth = max(4.dp.toPx(), min(stepWidthPx * 0.72f, 9.dp.toPx()))
+                        val bandHeight = max(tickLength, size.height * MicrotonalValueStateMinBandHeightRatio)
+                        drawRoundRect(
+                            color = stateColor.copy(alpha = MicrotonalValueStateBandAlpha),
+                            topLeft = Offset(x - bandWidth / 2f, panelInset),
+                            size = Size(bandWidth, bandHeight),
+                            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx())
+                        )
+                        drawLine(
+                            color = stateColor.copy(alpha = MicrotonalValueStateHaloAlpha),
+                            start = Offset(x, panelInset),
+                            end = Offset(x, panelInset + tickLength),
+                            strokeWidth = max(strokeWidth + 3.dp.toPx(), 4.dp.toPx())
+                        )
+                    }
                     drawLine(
-                        color = stateColor?.copy(alpha = alpha / 255f) ?: xenRulerHighlight(alpha),
+                        color = stateColor?.copy(
+                            alpha = max(alpha / 255f, MicrotonalValueStateLineMinAlpha)
+                        ) ?: xenRulerHighlight(alpha),
                         start = Offset(x, panelInset),
                         end = Offset(x, panelInset + tickLength),
-                        strokeWidth = strokeWidth
+                        strokeWidth = if (stateColor != null) {
+                            max(strokeWidth, MicrotonalValueStateLineMinWidthDp.dp.toPx())
+                        } else {
+                            strokeWidth
+                        }
                     )
                     if (isC) {
                         val octaveLabel = "C${step / normalizedEdo - 1}"
@@ -2548,6 +2570,11 @@ private const val DenseLineStepEpsilon = 0.0001
 private const val DenseLineMinVisibleRatio = 0.02f
 private const val ControlValueStateAlpha = 0.58f
 private const val SelectedValueAlpha = 0.38f
+private const val MicrotonalValueStateBandAlpha = 0.18f
+private const val MicrotonalValueStateHaloAlpha = 0.26f
+private const val MicrotonalValueStateLineMinAlpha = 0.72f
+private const val MicrotonalValueStateLineMinWidthDp = 2.6f
+private const val MicrotonalValueStateMinBandHeightRatio = 0.3f
 private val ChordleBackground = Color(0xFF121213)
 private val ChordleSurface = Color(0xFF1A1A1B)
 private val ChordleText = Color(0xFFF8F8F8)
