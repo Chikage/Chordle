@@ -54,6 +54,8 @@ private val simpleExtraPitchNameTables = mapOf(
     )
 )
 private val extraPitchNameTableCache = mutableMapOf<Int, List<ExtraPitchName?>>()
+private val whiteMidiPitchClasses = setOf(0, 2, 4, 5, 7, 9, 11)
+private const val DuplicateRowNoteMessage = "这一行不能填写两个相同的音"
 
 const val LowestPlayableMidiNote = 21
 const val HighestPlayableMidiNote = 108
@@ -79,11 +81,13 @@ const val MaxOvertoneToneCount = 10
 const val DefaultOvertoneToneCount = 4
 val DefaultPlayableRange = 48..72
 val FullPianoRange = LowestPlayableMidiNote..HighestPlayableMidiNote
+val PlayableWhiteKeyMidiNotes = FullPianoRange.filter(::isWhiteMidiKey)
 val DefaultOvertoneRange = 8..16
 
 enum class TileState {
     Empty,
     Input,
+    Carried,
     Correct,
     ExtraCorrect,
     Present,
@@ -220,20 +224,151 @@ class ChordleGame(
             message = missingSelectionMessage
             return
         }
-        if (currentColumn >= columns) {
+        val column = nextOpenColumn(currentColumn)
+        if (column >= columns) {
             message = "这一行已经填满"
             return
         }
-        setCell(currentRow, currentColumn, GuessCell(note, TileState.Input))
-        currentColumn += 1
+        if (rejectDuplicateInCurrentRow(note, column)) {
+            return
+        }
+        setCell(currentRow, column, GuessCell(note, TileState.Input))
+        currentColumn = nextOpenColumn(column + 1)
     }
 
     fun deleteLast() {
-        if (status != GameStatus.Playing || currentColumn <= 0) {
-            return
+        val column = previousInputColumn() ?: return
+        setCell(currentRow, column, GuessCell())
+        currentColumn = nextOpenColumn(0)
+    }
+
+    fun canDeleteLast(): Boolean {
+        return previousInputColumn() != null
+    }
+
+    fun canSortRow(row: Int): Boolean {
+        if (status != GameStatus.Playing || row != currentRow || row !in 0 until maxAttempts) {
+            return false
         }
-        currentColumn -= 1
-        setCell(currentRow, currentColumn, GuessCell())
+        return rowNotes(row).size > 1
+    }
+
+    fun sortRowBy(row: Int, sortKey: (Int) -> Int = { it }): Boolean {
+        if (!canSortRow(row)) {
+            return false
+        }
+        val sortedCells = (0 until columns)
+            .map { column -> cell(row, column) }
+            .filter { cell -> cell.note != null }
+            .sortedWith(
+                compareBy<GuessCell> { cell -> sortKey(cell.note ?: Int.MIN_VALUE) }
+                    .thenBy { cell -> cell.note ?: Int.MIN_VALUE }
+            )
+
+        repeat(columns) { column ->
+            setCell(row, column, sortedCells.getOrNull(column) ?: GuessCell())
+        }
+        currentColumn = nextOpenColumn(0)
+        message = null
+        return true
+    }
+
+    fun canCarryCorrectCellFromPreviousRow(sourceRow: Int, column: Int): Boolean {
+        if (status != GameStatus.Playing || currentRow <= 0 || sourceRow != currentRow - 1 || column !in 0 until columns) {
+            return false
+        }
+        val source = cell(sourceRow, column)
+        val note = source.note ?: return false
+        return source.state == TileState.Correct && !rowContainsNote(currentRow, note, exceptColumn = column)
+    }
+
+    fun canDragPresentCellFromPreviousRow(sourceRow: Int, column: Int): Boolean {
+        if (status != GameStatus.Playing || currentRow <= 0 || sourceRow != currentRow - 1 || column !in 0 until columns) {
+            return false
+        }
+        val source = cell(sourceRow, column)
+        return source.state == TileState.Present && source.note != null
+    }
+
+    fun canPlacePresentCellFromPreviousRow(sourceRow: Int, sourceColumn: Int, targetColumn: Int): Boolean {
+        return targetColumn in 0 until columns &&
+            sourceColumn != targetColumn &&
+            canDragPresentCellFromPreviousRow(sourceRow, sourceColumn) &&
+            cell(sourceRow, sourceColumn).note?.let { note ->
+                !rowContainsNote(currentRow, note, exceptColumn = targetColumn)
+            } == true
+    }
+
+    fun carryCorrectCellFromPreviousRow(column: Int): Boolean {
+        val sourceRow = currentRow - 1
+        if (status != GameStatus.Playing || currentRow <= 0 || column !in 0 until columns) {
+            return false
+        }
+        val source = cell(sourceRow, column)
+        val note = source.note ?: return false
+        if (source.state != TileState.Correct) {
+            return false
+        }
+        if (rejectDuplicateInCurrentRow(note, column)) {
+            return false
+        }
+        setCell(currentRow, column, GuessCell(note, TileState.Carried))
+        currentColumn = nextOpenColumn(currentColumn)
+        message = null
+        return true
+    }
+
+    fun placePresentCellFromPreviousRow(sourceColumn: Int, targetColumn: Int): Boolean {
+        val sourceRow = currentRow - 1
+        if (
+            targetColumn !in 0 until columns ||
+            sourceColumn == targetColumn ||
+            !canDragPresentCellFromPreviousRow(sourceRow, sourceColumn)
+        ) {
+            return false
+        }
+        val note = cell(sourceRow, sourceColumn).note ?: return false
+        if (rejectDuplicateInCurrentRow(note, targetColumn)) {
+            return false
+        }
+        setCell(currentRow, targetColumn, GuessCell(note, TileState.Input))
+        currentColumn = nextOpenColumn(currentColumn)
+        message = null
+        return true
+    }
+
+    private fun previousInputColumn(): Int? {
+        if (status != GameStatus.Playing) {
+            return null
+        }
+        for (column in columns - 1 downTo 0) {
+            if (cell(currentRow, column).state == TileState.Input) {
+                return column
+            }
+        }
+        return null
+    }
+
+    private fun nextOpenColumn(startColumn: Int): Int {
+        var column = startColumn.coerceIn(0, columns)
+        while (column < columns && cell(currentRow, column).note != null) {
+            column += 1
+        }
+        return column
+    }
+
+    private fun rowContainsNote(row: Int, note: Int, exceptColumn: Int? = null): Boolean {
+        return (0 until columns).any { column ->
+            column != exceptColumn && cell(row, column).note == note
+        }
+    }
+
+    private fun rejectDuplicateInCurrentRow(note: Int, exceptColumn: Int? = null): Boolean {
+        if (!rowContainsNote(currentRow, note, exceptColumn)) {
+            return false
+        }
+        message = DuplicateRowNoteMessage
+        return true
     }
 
     fun submitGuess(itemName: String = "音") {
@@ -321,6 +456,7 @@ class ChordleGame(
             TileState.ExtraNear,
             TileState.Absent -> true
             TileState.Empty,
+            TileState.Carried,
             TileState.Input -> false
         }
     }
@@ -405,17 +541,27 @@ fun noteLabel(midiNote: Int): String {
     return "$pitch$octave"
 }
 
+fun isWhiteMidiKey(midiNote: Int): Boolean {
+    return midiNote.floorMod(12) in whiteMidiPitchClasses
+}
+
 fun rangeLabel(range: IntRange): String {
     val sanitized = sanitizePlayableRange(range)
     return "${noteLabel(sanitized.first)}-${noteLabel(sanitized.last)}"
 }
 
 fun sanitizePlayableRange(range: IntRange): IntRange {
-    var low = range.first.coerceIn(LowestPlayableMidiNote, HighestPlayableMidiNote - MinimumPlayableRangeSemitones)
-    var high = range.last.coerceIn(LowestPlayableMidiNote + MinimumPlayableRangeSemitones, HighestPlayableMidiNote)
+    var low = nextWhiteKeyAtOrAbove(
+        range.first.coerceIn(LowestPlayableMidiNote, HighestPlayableMidiNote - MinimumPlayableRangeSemitones)
+    )
+    var high = previousWhiteKeyAtOrBelow(
+        range.last.coerceIn(LowestPlayableMidiNote + MinimumPlayableRangeSemitones, HighestPlayableMidiNote)
+    )
     if (high - low < MinimumPlayableRangeSemitones) {
-        high = (low + MinimumPlayableRangeSemitones).coerceAtMost(HighestPlayableMidiNote)
-        low = (high - MinimumPlayableRangeSemitones).coerceAtLeast(LowestPlayableMidiNote)
+        high = nextWhiteKeyAtOrAbove(low + MinimumPlayableRangeSemitones)
+            .coerceAtMost(HighestPlayableMidiNote)
+        low = previousWhiteKeyAtOrBelow(high - MinimumPlayableRangeSemitones)
+            .coerceAtLeast(LowestPlayableMidiNote)
     }
     return low..high
 }
@@ -802,6 +948,22 @@ private fun nextCAtOrAbove(midiNote: Int): Int {
 
 private fun previousCAtOrBelow(midiNote: Int): Int {
     return midiNote - midiNote.floorMod(12)
+}
+
+private fun nextWhiteKeyAtOrAbove(midiNote: Int): Int {
+    var note = midiNote
+    while (!isWhiteMidiKey(note)) {
+        note += 1
+    }
+    return note
+}
+
+private fun previousWhiteKeyAtOrBelow(midiNote: Int): Int {
+    var note = midiNote
+    while (!isWhiteMidiKey(note)) {
+        note -= 1
+    }
+    return note
 }
 
 private fun Int.floorMod(other: Int): Int {

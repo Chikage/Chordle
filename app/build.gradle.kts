@@ -30,20 +30,20 @@ fun signingProperty(vararg names: String): String? =
 
 fun requiredSigningProperty(value: String?, description: String): String =
     value?.takeIf(String::isNotBlank)
-        ?: error("Release signing requires $description")
+        ?: error("App signing requires $description")
 
-val releaseStoreFile = rootProject.file("key.jks")
-check(releaseStoreFile.isFile) {
-    "Release signing requires ${releaseStoreFile.absolutePath}"
+val sharedStoreFile = rootProject.file("key.jks")
+check(sharedStoreFile.isFile) {
+    "App signing requires ${sharedStoreFile.absolutePath}"
 }
-val releaseStorePassword = requiredSigningProperty(
-    signingProperty("RELEASE_STORE_PASSWORD", "sign.store.password"),
-    "RELEASE_STORE_PASSWORD or sign.store.password"
+val sharedStorePassword = requiredSigningProperty(
+    signingProperty("SIGNING_STORE_PASSWORD", "RELEASE_STORE_PASSWORD", "sign.store.password"),
+    "SIGNING_STORE_PASSWORD, RELEASE_STORE_PASSWORD or sign.store.password"
 )
-val releaseKeyAlias = signingProperty("RELEASE_KEY_ALIAS", "sign.key.alias") ?: "as2134u"
-val releaseKeyPassword = requiredSigningProperty(
-    signingProperty("RELEASE_KEY_PASSWORD", "sign.key.password") ?: releaseStorePassword,
-    "RELEASE_KEY_PASSWORD or sign.key.password"
+val sharedKeyAlias = signingProperty("SIGNING_KEY_ALIAS", "RELEASE_KEY_ALIAS", "sign.key.alias") ?: "as2134u"
+val sharedKeyPassword = requiredSigningProperty(
+    signingProperty("SIGNING_KEY_PASSWORD", "RELEASE_KEY_PASSWORD", "sign.key.password") ?: sharedStorePassword,
+    "SIGNING_KEY_PASSWORD, RELEASE_KEY_PASSWORD or sign.key.password"
 )
 
 android {
@@ -52,11 +52,11 @@ android {
     ndkVersion = "28.2.13676358"
 
     signingConfigs {
-        create("release") {
-            storeFile = releaseStoreFile
-            storePassword = releaseStorePassword
-            keyAlias = releaseKeyAlias
-            keyPassword = releaseKeyPassword
+        create("shared") {
+            storeFile = sharedStoreFile
+            storePassword = sharedStorePassword
+            keyAlias = sharedKeyAlias
+            keyPassword = sharedKeyPassword
         }
     }
 
@@ -65,7 +65,7 @@ android {
         minSdk = 24
         targetSdk = 37
         versionCode = 1
-        versionName = "0.1.2"
+        versionName = "0.1.5"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -107,8 +107,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("shared")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))

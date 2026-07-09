@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -51,6 +53,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -67,6 +71,8 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -75,8 +81,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import icu.ringona.chordle.audio.NativeAudioEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -121,6 +129,19 @@ private enum class ChordleMode {
     Extra,
     Overtones
 }
+
+private data class BoardCellKey(
+    val row: Int,
+    val column: Int
+)
+
+private data class DraggedPreviousTile(
+    val sourceColumn: Int,
+    val note: Int,
+    val state: TileState,
+    val touchPosition: Offset,
+    val dragOffset: Offset = Offset.Zero
+)
 
 @Composable
 private fun ChordleTheme(content: @Composable () -> Unit) {
@@ -251,6 +272,7 @@ private fun ChordleGameScreen(
         ChordleMode.Extra -> "${game.columns} 音 · ${extraEdo}EDO · ${extraRangeLabel(extraEdo, playableRange)}"
         ChordleMode.Normal -> "${game.columns} 音 · ${rangeLabel(playableRange)}"
     }
+    val valueStates = game.guessedValueStates()
 
     BackHandler(enabled = !showHelp && !showSettings) {
         NativeAudioEngine.allSoundOff()
@@ -340,6 +362,7 @@ private fun ChordleGameScreen(
                 game = game,
                 audioReady = audioStatus == AudioStatus.Ready,
                 requireJudgedPlayback = !keyPitchPreviewEnabled,
+                onSortRow = { row -> game.sortRowBy(row) },
                 onPlayRow = { row ->
                     scope.launch {
                         playTones(
@@ -369,6 +392,7 @@ private fun ChordleGameScreen(
                 OvertoneInputPanel(
                     game = game,
                     overtoneRange = overtoneRange,
+                    valueStates = valueStates,
                     audioReady = audioStatus == AudioStatus.Ready,
                     onPlayChord = {
                         if (audioStatus == AudioStatus.Ready) {
@@ -448,12 +472,15 @@ private fun ChordleGameScreen(
                                 edo = extraEdo,
                                 noteRange = playableRange,
                                 selectedStep = selectedValue,
+                                valueStates = valueStates,
                                 onStepPressed = onValuePressed,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         } else {
                             PianoKeyboard(
+                                noteRange = playableRange,
                                 selectedNote = selectedValue,
+                                valueStates = valueStates,
                                 onNotePressed = onValuePressed,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -725,15 +752,25 @@ private fun BoardArea(
     game: ChordleGame,
     audioReady: Boolean,
     requireJudgedPlayback: Boolean,
+    onSortRow: (Int) -> Unit,
     onPlayRow: (Int) -> Unit,
     onPlayValue: (Int) -> Unit,
     valueLabel: (Int) -> String,
     modifier: Modifier = Modifier
 ) {
+    val cellBounds = remember { mutableStateMapOf<BoardCellKey, Rect>() }
+    var boardBounds by remember { mutableStateOf<Rect?>(null) }
+    var draggedTile by remember { mutableStateOf<DraggedPreviousTile?>(null) }
+
     BoxWithConstraints(
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .onGloballyPositioned { coordinates ->
+                boardBounds = coordinates.boundsInRoot()
+            },
         contentAlignment = Alignment.Center
     ) {
+        val density = LocalDensity.current
         val gap = 6.dp
         val playButtonLane = 40.dp
         val tileSize = remember(maxWidth, maxHeight, game.columns) {
@@ -758,6 +795,22 @@ private fun BoardArea(
                     val canPlayRow = audioReady &&
                         rowNotes.isNotEmpty() &&
                         (!requireJudgedPlayback || game.rowIsJudged(row))
+                    val canSortRow = game.canSortRow(row)
+                    TextButton(
+                        onClick = { onSortRow(row) },
+                        enabled = canSortRow,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .size(34.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_sort_24),
+                            contentDescription = "排序此行",
+                            tint = if (canSortRow) ChordleMuted else WordleBorder,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     Row(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalArrangement = Arrangement.spacedBy(gap),
@@ -765,6 +818,76 @@ private fun BoardArea(
                     ) {
                         repeat(game.columns) { column ->
                             val cell = game.cell(row, column)
+                            val cellKey = BoardCellKey(row, column)
+                            val sourceNote = cell.note
+                            val canDragTile = sourceNote != null &&
+                                (game.canCarryCorrectCellFromPreviousRow(row, column) ||
+                                    game.canDragPresentCellFromPreviousRow(row, column))
+                            val dragModifier = if (
+                                sourceNote != null &&
+                                canDragTile
+                            ) {
+                                Modifier.pointerInput(row, column, sourceNote, cell.state, game.currentRow, game.status) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { touchOffset ->
+                                            val sourceBounds = cellBounds[cellKey]
+                                            if (sourceBounds != null) {
+                                                draggedTile = DraggedPreviousTile(
+                                                    sourceColumn = column,
+                                                    note = sourceNote,
+                                                    state = cell.state,
+                                                    touchPosition = sourceBounds.topLeft + touchOffset
+                                                )
+                                            }
+                                        },
+                                        onDragCancel = {
+                                            draggedTile = null
+                                        },
+                                        onDragEnd = {
+                                            val drag = draggedTile
+                                            if (drag != null) {
+                                                val dropPosition = drag.touchPosition + drag.dragOffset
+                                                when (drag.state) {
+                                                    TileState.Correct -> {
+                                                        val targetBounds = cellBounds[
+                                                            BoardCellKey(game.currentRow, drag.sourceColumn)
+                                                        ]
+                                                        if (targetBounds?.contains(dropPosition) == true) {
+                                                            game.carryCorrectCellFromPreviousRow(drag.sourceColumn)
+                                                        }
+                                                    }
+                                                    TileState.Present -> {
+                                                        val targetColumn = (0 until game.columns).firstOrNull { targetColumn ->
+                                                            cellBounds[BoardCellKey(game.currentRow, targetColumn)]
+                                                                ?.contains(dropPosition) == true
+                                                        }
+                                                        if (targetColumn != null) {
+                                                            game.placePresentCellFromPreviousRow(
+                                                                sourceColumn = drag.sourceColumn,
+                                                                targetColumn = targetColumn
+                                                            )
+                                                        }
+                                                    }
+                                                    else -> Unit
+                                                }
+                                            }
+                                            draggedTile = null
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            draggedTile = draggedTile?.let { drag ->
+                                                if (drag.sourceColumn == column) {
+                                                    drag.copy(dragOffset = drag.dragOffset + dragAmount)
+                                                } else {
+                                                    drag
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                Modifier
+                            }
                             val canPlayCell = audioReady &&
                                 (!requireJudgedPlayback || game.cellIsJudged(row, column))
                             ChordTile(
@@ -776,7 +899,12 @@ private fun BoardArea(
                                 valueLabel = valueLabel,
                                 onClick = cell.note
                                     ?.takeIf { canPlayCell }
-                                    ?.let { value -> { onPlayValue(value) } }
+                                    ?.let { value -> { onPlayValue(value) } },
+                                modifier = Modifier
+                                    .onGloballyPositioned { coordinates ->
+                                        cellBounds[cellKey] = coordinates.boundsInRoot()
+                                    }
+                                    .then(dragModifier)
                             )
                         }
                     }
@@ -798,6 +926,32 @@ private fun BoardArea(
                 }
             }
         }
+
+        val drag = draggedTile
+        val bounds = boardBounds
+        if (drag != null && bounds != null) {
+            val tileSizePx = with(density) { tileSize.toPx() }
+            val tileTopLeft = drag.touchPosition +
+                drag.dragOffset -
+                bounds.topLeft -
+                Offset(tileSizePx / 2f, tileSizePx / 2f)
+            ChordTile(
+                cell = GuessCell(
+                    note = drag.note,
+                    state = if (drag.state == TileState.Correct) TileState.Carried else drag.state
+                ),
+                active = false,
+                size = tileSize,
+                valueLabel = valueLabel,
+                onClick = null,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset {
+                        IntOffset(tileTopLeft.x.roundToInt(), tileTopLeft.y.roundToInt())
+                    }
+                    .zIndex(1f)
+            )
+        }
     }
 }
 
@@ -807,9 +961,11 @@ private fun ChordTile(
     active: Boolean,
     size: Dp,
     valueLabel: (Int) -> String,
-    onClick: (() -> Unit)?
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier
 ) {
     val background = when (cell.state) {
+        TileState.Carried,
         TileState.Correct -> ChordleGreen
         TileState.ExtraCorrect -> ExtraCorrectBlue
         TileState.Present -> ChordleYellow
@@ -825,7 +981,7 @@ private fun ChordTile(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(size)
             .background(background)
             .border(width = 2.dp, color = border)
@@ -867,6 +1023,47 @@ private fun ChordTile(
     }
 }
 
+private fun ChordleGame.guessedValueStates(): Map<Int, TileState> {
+    val states = mutableMapOf<Int, TileState>()
+    for (row in 0 until maxAttempts) {
+        for (column in 0 until columns) {
+            val cell = cell(row, column)
+            val value = cell.note ?: continue
+            val priority = cell.state.valueStatePriority()
+            if (priority <= 0) {
+                continue
+            }
+            val previous = states[value]
+            if (previous == null || priority > previous.valueStatePriority()) {
+                states[value] = cell.state
+            }
+        }
+    }
+    return states
+}
+
+private fun TileState.valueStatePriority(): Int {
+    return when (this) {
+        TileState.Correct,
+        TileState.Carried -> 4
+        TileState.Present -> 3
+        TileState.ExtraCorrect -> 2
+        TileState.ExtraNear -> 1
+        else -> 0
+    }
+}
+
+private fun valueStateControlColor(state: TileState?): Color? {
+    return when (state) {
+        TileState.Correct,
+        TileState.Carried -> ChordleGreen
+        TileState.Present -> ChordleYellow
+        TileState.ExtraCorrect -> ExtraCorrectBlue
+        TileState.ExtraNear -> ExtraNearPink
+        else -> null
+    }
+}
+
 @Composable
 private fun InputPanel(
     game: ChordleGame,
@@ -881,6 +1078,7 @@ private fun InputPanel(
     onSubmit: () -> Unit = { game.submitGuess(submitItemName) },
     keyboardContent: @Composable (Int?, (Int) -> Unit) -> Unit = { selectedValue, onValuePressed ->
         PianoKeyboard(
+            noteRange = FullPianoRange,
             selectedNote = selectedValue,
             onNotePressed = onValuePressed,
             modifier = Modifier.fillMaxWidth()
@@ -941,7 +1139,7 @@ private fun InputPanel(
             }
             OutlinedButton(
                 onClick = { game.deleteLast() },
-                enabled = game.status == GameStatus.Playing && game.currentColumn > 0,
+                enabled = game.canDeleteLast(),
                 modifier = Modifier.weight(0.72f)
             ) {
                 Text("删除", maxLines = 1)
@@ -976,6 +1174,7 @@ private fun InputPanel(
 private fun OvertoneInputPanel(
     game: ChordleGame,
     overtoneRange: IntRange,
+    valueStates: Map<Int, TileState>,
     audioReady: Boolean,
     onPlayChord: () -> Unit,
     onPreviewMultiplier: (Int) -> Unit
@@ -1034,7 +1233,7 @@ private fun OvertoneInputPanel(
             }
             OutlinedButton(
                 onClick = { game.deleteLast() },
-                enabled = game.status == GameStatus.Playing && game.currentColumn > 0,
+                enabled = game.canDeleteLast(),
                 modifier = Modifier.weight(0.72f)
             ) {
                 Text("删除", maxLines = 1)
@@ -1064,6 +1263,7 @@ private fun OvertoneInputPanel(
         OvertoneNumberPad(
             multiplierRange = overtoneRange,
             selectedMultiplier = game.selectedNote,
+            valueStates = valueStates,
             onMultiplierPressed = onPreviewMultiplier,
             modifier = Modifier.fillMaxWidth()
         )
@@ -1074,6 +1274,7 @@ private fun OvertoneInputPanel(
 private fun OvertoneNumberPad(
     multiplierRange: IntRange,
     selectedMultiplier: Int?,
+    valueStates: Map<Int, TileState> = emptyMap(),
     onMultiplierPressed: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1094,13 +1295,18 @@ private fun OvertoneNumberPad(
             ) {
                 row.forEach { multiplier ->
                     val selected = multiplier == selectedMultiplier
+                    val stateColor = valueStateControlColor(valueStates[multiplier])
                     Button(
                         onClick = { onMultiplierPressed(multiplier) },
                         modifier = Modifier
                             .weight(1f)
                             .height(42.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selected) ChordleGreen else ChordleSurface,
+                            containerColor = when {
+                                selected -> SelectedValuePurple.copy(alpha = SelectedValueAlpha)
+                                stateColor != null -> stateColor.copy(alpha = ControlValueStateAlpha)
+                                else -> ChordleSurface
+                            },
                             contentColor = Color.White
                         ),
                         contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
@@ -1128,13 +1334,16 @@ private fun OvertoneNumberPad(
 
 @Composable
 private fun PianoKeyboard(
+    noteRange: IntRange,
     selectedNote: Int?,
+    valueStates: Map<Int, TileState> = emptyMap(),
     onNotePressed: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    val whiteNotes = remember { PianoRange.filterNot(::isBlackKey) }
-    val blackNotes = remember { PianoRange.filter(::isBlackKey) }
+    val sanitizedRange = remember(noteRange) { sanitizePlayableRange(noteRange) }
+    val whiteNotes = remember(sanitizedRange) { sanitizedRange.filterNot(::isBlackKey) }
+    val blackNotes = remember(sanitizedRange) { sanitizedRange.filter(::isBlackKey) }
     val labelPaint = remember {
         AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
             textAlign = AndroidPaint.Align.CENTER
@@ -1197,13 +1406,30 @@ private fun PianoKeyboard(
             withTransform({ translate(left = offsetX) }) {
                 whiteNotes.forEachIndexed { index, note ->
                     val x = index * whiteWidthPx
-                    val fill = if (note == selectedNote) Color(0xFFA9DCA2) else Color(0xFFE9EAEC)
+                    val topLeft = Offset(x + keyGap / 2f, 0f)
+                    val keySize = Size(whiteWidthPx - keyGap, size.height)
                     drawRoundRect(
-                        color = fill,
-                        topLeft = Offset(x + keyGap / 2f, 0f),
-                        size = Size(whiteWidthPx - keyGap, size.height),
+                        color = Color(0xFFE9EAEC),
+                        topLeft = topLeft,
+                        size = keySize,
                         cornerRadius = corner
                     )
+                    valueStateControlColor(valueStates[note])?.let { color ->
+                        drawRoundRect(
+                            color = color.copy(alpha = ControlValueStateAlpha),
+                            topLeft = topLeft,
+                            size = keySize,
+                            cornerRadius = corner
+                        )
+                    }
+                    if (note == selectedNote) {
+                        drawRoundRect(
+                            color = SelectedValuePurple.copy(alpha = SelectedValueAlpha),
+                            topLeft = topLeft,
+                            size = keySize,
+                            cornerRadius = corner
+                        )
+                    }
                     drawIntoCanvas { canvas ->
                         labelPaint.color = android.graphics.Color.rgb(39, 39, 42)
                         labelPaint.textSize = 11.sp.toPx()
@@ -1219,13 +1445,30 @@ private fun PianoKeyboard(
                 blackNotes.forEach { note ->
                     val before = whiteNotes.count { it < note }
                     val x = before * whiteWidthPx - blackWidth / 2f
-                    val fill = if (note == selectedNote) Color(0xFF6AAA64) else Color(0xFF151518)
+                    val topLeft = Offset(x, 0f)
+                    val keySize = Size(blackWidth, blackHeight)
                     drawRoundRect(
-                        color = fill,
-                        topLeft = Offset(x, 0f),
-                        size = Size(blackWidth, blackHeight),
+                        color = Color(0xFF151518),
+                        topLeft = topLeft,
+                        size = keySize,
                         cornerRadius = corner
                     )
+                    valueStateControlColor(valueStates[note])?.let { color ->
+                        drawRoundRect(
+                            color = color.copy(alpha = ControlValueStateAlpha),
+                            topLeft = topLeft,
+                            size = keySize,
+                            cornerRadius = corner
+                        )
+                    }
+                    if (note == selectedNote) {
+                        drawRoundRect(
+                            color = SelectedValuePurple.copy(alpha = SelectedValueAlpha),
+                            topLeft = topLeft,
+                            size = keySize,
+                            cornerRadius = corner
+                        )
+                    }
                 }
             }
         }
@@ -1237,6 +1480,7 @@ private fun MicrotonalKeyboard(
     edo: Int,
     noteRange: IntRange,
     selectedStep: Int?,
+    valueStates: Map<Int, TileState> = emptyMap(),
     onStepPressed: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1337,7 +1581,7 @@ private fun MicrotonalKeyboard(
                 selectedStep?.takeIf { it in touchStepRange }?.let { step ->
                     val x = (step - rulerStepRange.first) * stepWidthPx
                     drawRoundRect(
-                        color = ChordleGreen.copy(alpha = 0.28f),
+                        color = SelectedValuePurple.copy(alpha = SelectedValueAlpha),
                         topLeft = Offset(x + 1.dp.toPx(), panelInset),
                         size = Size(max(2f, stepWidthPx - 2.dp.toPx()), size.height - panelInset * 2f),
                         cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx())
@@ -1368,9 +1612,10 @@ private fun MicrotonalKeyboard(
                     }
                     val tickLength = size.height * MicrotonalCTickHeightRatio * ratio
                     val alpha = (MicrotonalCTickAlpha * ratio).roundToInt().coerceIn(0, MicrotonalCTickAlpha)
+                    val stateColor = valueStateControlColor(valueStates[step])
                     val strokeWidth = if (isC) 1.4.dp.toPx() else 1.dp.toPx()
                     drawLine(
-                        color = xenRulerHighlight(alpha),
+                        color = stateColor?.copy(alpha = alpha / 255f) ?: xenRulerHighlight(alpha),
                         start = Offset(x, panelInset),
                         end = Offset(x, panelInset + tickLength),
                         strokeWidth = strokeWidth
@@ -1742,6 +1987,30 @@ private fun DiscreteIntRangeSlider(
 }
 
 @Composable
+private fun WhiteKeyRangeSlider(
+    value: IntRange,
+    onValueChange: (IntRange) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val whiteKeys = PlayableWhiteKeyMidiNotes
+    val sanitized = sanitizePlayableRange(value)
+    val lowIndex = whiteKeys.indexOf(sanitized.first).coerceAtLeast(0)
+    val highIndex = whiteKeys.indexOf(sanitized.last).coerceAtLeast(lowIndex)
+
+    DiscreteIntRangeSlider(
+        value = lowIndex..highIndex,
+        onValueChange = { selectedRange ->
+            val low = whiteKeys[selectedRange.first.coerceIn(whiteKeys.indices)]
+            val high = whiteKeys[selectedRange.last.coerceIn(whiteKeys.indices)]
+            onValueChange(sanitizePlayableRange(low..high))
+        },
+        valueRange = whiteKeys.indices,
+        steps = whiteKeys.size - 2,
+        modifier = modifier
+    )
+}
+
+@Composable
 private fun RangeSettingsDialog(
     range: IntRange,
     chordToneCount: Int,
@@ -1818,15 +2087,13 @@ private fun RangeSettingsDialog(
                     "音域两端：${noteLabel(sanitized.first)} / ${noteLabel(sanitized.last)}",
                     fontWeight = FontWeight.Bold
                 )
-                DiscreteIntRangeSlider(
+                WhiteKeyRangeSlider(
                     value = sanitized,
                     onValueChange = { value ->
                         val nextRange = sanitizePlayableRange(value)
                         low = nextRange.first.toFloat()
                         high = nextRange.last.toFloat()
-                    },
-                    valueRange = LowestPlayableMidiNote..HighestPlayableMidiNote,
-                    steps = HighestPlayableMidiNote - LowestPlayableMidiNote - 1
+                    }
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
@@ -2270,7 +2537,6 @@ private fun xenRulerHighlight(alpha: Int): Color {
     return Color(0xFFFFDE6F).copy(alpha = alpha.coerceIn(0, 255) / 255f)
 }
 
-private val PianoRange = FullPianoRange
 private const val DefaultKeyPitchPreviewEnabled = false
 private const val HiddenExtraEdoMark = 'N'
 private const val SecondaryExtraEdoMark = '1'
@@ -2280,6 +2546,8 @@ private const val MicrotonalCTickHeightRatio = 0.84f
 private const val MicrotonalCTickAlpha = 184
 private const val DenseLineStepEpsilon = 0.0001
 private const val DenseLineMinVisibleRatio = 0.02f
+private const val ControlValueStateAlpha = 0.58f
+private const val SelectedValueAlpha = 0.38f
 private val ChordleBackground = Color(0xFF121213)
 private val ChordleSurface = Color(0xFF1A1A1B)
 private val ChordleText = Color(0xFFF8F8F8)
@@ -2290,6 +2558,7 @@ private val ChordleYellow = Color(0xFFCCB757)
 private val ChordleGray = Color(0xFF86888A)
 private val ExtraCorrectBlue = Color(0xFF8EB8FF)
 private val ExtraNearPink = Color(0xFFF0A9C8)
+private val SelectedValuePurple = Color(0xFFCBB8FF)
 private val ExtraEdoMarkRatios = mapOf(
     '0' to 1f,
     '1' to 0.8f,

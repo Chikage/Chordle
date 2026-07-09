@@ -56,10 +56,250 @@ class ChordGameTest {
     }
 
     @Test
+    fun confirmSelectedValueRejectsDuplicateNoteInCurrentRow() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+
+        game.selectNote(48)
+        game.confirmSelectedValue(missingSelectionMessage = "missing")
+        game.selectNote(48)
+        game.confirmSelectedValue(missingSelectionMessage = "missing")
+
+        assertEquals(listOf(48), game.rowNotes(0))
+        assertEquals(null, game.cell(0, 1).note)
+        assertEquals(1, game.currentColumn)
+        assertEquals("这一行不能填写两个相同的音", game.message)
+    }
+
+    @Test
+    fun carriedCorrectCellRejectsDuplicateNoteInCurrentRow() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(47, 52, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        game.selectNote(52)
+        game.confirmSelectedValue(missingSelectionMessage = "missing")
+
+        assertEquals(false, game.canCarryCorrectCellFromPreviousRow(0, 1))
+        assertEquals(false, game.carryCorrectCellFromPreviousRow(1))
+        assertEquals(null, game.cell(1, 1).note)
+        assertEquals(1, game.currentColumn)
+        assertEquals("这一行不能填写两个相同的音", game.message)
+    }
+
+    @Test
+    fun movedPresentCellRejectsDuplicateNoteInCurrentRow() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(52, 48, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        game.selectNote(52)
+        game.confirmSelectedValue(missingSelectionMessage = "missing")
+
+        assertEquals(false, game.canPlacePresentCellFromPreviousRow(0, 0, 1))
+        assertEquals(false, game.placePresentCellFromPreviousRow(sourceColumn = 0, targetColumn = 1))
+        assertEquals(null, game.cell(1, 1).note)
+        assertEquals(1, game.currentColumn)
+        assertEquals("这一行不能填写两个相同的音", game.message)
+    }
+
+    @Test
+    fun carriedCorrectCellSkipsThatColumnWhileFillingNextGuess() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(48, 57, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        assertEquals(true, game.carryCorrectCellFromPreviousRow(0))
+        assertEquals(48, game.cell(1, 0).note)
+        assertEquals(TileState.Carried, game.cell(1, 0).state)
+        assertEquals(false, game.cellIsJudged(1, 0))
+        assertEquals(1, game.currentColumn)
+
+        listOf(52, 55).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        assertEquals(listOf(48, 52, 55), game.rowNotes(1))
+        game.submitGuess()
+        assertEquals(GameStatus.Won, game.status)
+    }
+
+    @Test
+    fun carriedCorrectCellCanReplaceFilledMatchingColumn() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(47, 52, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        listOf(48, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        assertEquals(59, game.cell(1, 1).note)
+
+        assertEquals(true, game.carryCorrectCellFromPreviousRow(1))
+
+        assertEquals(52, game.cell(1, 1).note)
+        assertEquals(TileState.Carried, game.cell(1, 1).state)
+        assertEquals(2, game.currentColumn)
+    }
+
+    @Test
+    fun deleteLastSkipsCarriedCells() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(48, 57, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+        game.carryCorrectCellFromPreviousRow(0)
+        game.selectNote(52)
+        game.confirmSelectedValue(missingSelectionMessage = "missing")
+
+        game.deleteLast()
+
+        assertEquals(48, game.cell(1, 0).note)
+        assertEquals(TileState.Carried, game.cell(1, 0).state)
+        assertEquals(null, game.cell(1, 1).note)
+        assertEquals(1, game.currentColumn)
+        assertEquals(false, game.canDeleteLast())
+    }
+
+    @Test
+    fun sortRowByReordersFilledCellsAndKeepsNextOpenColumn() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(55, 48).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        assertEquals(true, game.sortRowBy(0))
+
+        assertEquals(listOf(48, 55), game.rowNotes(0))
+        assertEquals(48, game.cell(0, 0).note)
+        assertEquals(55, game.cell(0, 1).note)
+        assertEquals(null, game.cell(0, 2).note)
+        assertEquals(2, game.currentColumn)
+    }
+
+    @Test
+    fun sortRowByPreservesCellStatesWithSortedValues() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(48, 57, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+        game.carryCorrectCellFromPreviousRow(0)
+        listOf(55, 52).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        assertEquals(true, game.sortRowBy(1))
+
+        assertEquals(listOf(48, 52, 55), game.rowNotes(1))
+        assertEquals(
+            listOf(TileState.Carried, TileState.Input, TileState.Input),
+            (0 until game.columns).map { column -> game.cell(1, column).state }
+        )
+        assertEquals(3, game.currentColumn)
+    }
+
+    @Test
+    fun presentCellCanMoveToDifferentColumnAsInput() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(52, 48, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        assertEquals(TileState.Present, game.cell(0, 0).state)
+        assertEquals(false, game.placePresentCellFromPreviousRow(sourceColumn = 0, targetColumn = 0))
+        assertEquals(true, game.placePresentCellFromPreviousRow(sourceColumn = 0, targetColumn = 1))
+
+        assertEquals(52, game.cell(1, 1).note)
+        assertEquals(TileState.Input, game.cell(1, 1).state)
+        assertEquals(0, game.currentColumn)
+
+        listOf(48, 55).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+
+        assertEquals(listOf(48, 52, 55), game.rowNotes(1))
+        game.submitGuess()
+        assertEquals(GameStatus.Won, game.status)
+    }
+
+    @Test
+    fun presentCellCanReplaceFilledDifferentColumn() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(52, 48, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        listOf(48, 60).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        assertEquals(60, game.cell(1, 1).note)
+
+        assertEquals(true, game.placePresentCellFromPreviousRow(sourceColumn = 0, targetColumn = 1))
+
+        assertEquals(52, game.cell(1, 1).note)
+        assertEquals(TileState.Input, game.cell(1, 1).state)
+        assertEquals(2, game.currentColumn)
+    }
+
+    @Test
+    fun deleteLastCanRemovePresentCellMovedAheadOfCurrentColumn() {
+        val game = ChordleGame(ChordPuzzle(notes = listOf(48, 52, 55), label = "test"))
+        listOf(52, 48, 59).forEach { value ->
+            game.selectNote(value)
+            game.confirmSelectedValue(missingSelectionMessage = "missing")
+        }
+        game.submitGuess()
+
+        game.placePresentCellFromPreviousRow(sourceColumn = 0, targetColumn = 2)
+
+        assertEquals(52, game.cell(1, 2).note)
+        assertEquals(0, game.currentColumn)
+        assertEquals(true, game.canDeleteLast())
+
+        game.deleteLast()
+
+        assertEquals(null, game.cell(1, 2).note)
+        assertEquals(0, game.currentColumn)
+        assertEquals(false, game.canDeleteLast())
+    }
+
+    @Test
     fun sanitizePlayableRangeKeepsAtLeastOneOctave() {
         val range = sanitizePlayableRange(60..64)
 
         assertEquals(60..72, range)
+    }
+
+    @Test
+    fun sanitizePlayableRangeLimitsEndpointsToWhiteKeys() {
+        assertEquals(62..74, sanitizePlayableRange(61..73))
+        assertEquals(21..33, sanitizePlayableRange(21..34))
+        assertEquals(96..108, sanitizePlayableRange(97..108))
     }
 
     @Test

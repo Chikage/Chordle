@@ -1,2 +1,4 @@
 # ninja log v5
 0	5	0	clean	d3920058c31b983d
+3	397	1783615656360241984	CMakeFiles/xenaudio.dir/XenAudioEngine.cpp.o	281b4df27762d88a
+397	529	1783615656494155488	/Volumes/Files/Github/Chordle/app/build/intermediates/cxx/Debug/2e3z4w31/obj/arm64-v8a/libxenaudio.so	415412ea1228a032
