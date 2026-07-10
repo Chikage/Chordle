@@ -10,3 +10,5 @@ local.properties
 *.jks
 .DS_Store
 .codegraph/daemon.pid
+*.apk
+.DS_Store
