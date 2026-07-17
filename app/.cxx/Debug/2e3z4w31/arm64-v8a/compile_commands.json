@@ -1,7 +1,0 @@
-[
-{
-  "directory": "/Volumes/Files/Github/Chordle/app/.cxx/Debug/2e3z4w31/arm64-v8a",
-  "command": "/Users/zeta/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android24 --sysroot=/Users/zeta/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dxenaudio_EXPORTS -I/Volumes/Files/Github/Chordle/app/src/main/cpp/fluidsynth/include -I/Volumes/Files/Github/Chordle/app/src/main/cpp/fluidsynth/include/glib-2.0 -I/Volumes/Files/Github/Chordle/app/src/main/cpp/fluidsynth/lib/glib-2.0/include -I/Volumes/Files/Github/Chordle/app/src/main/cpp/oboe/include -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++14 -fno-limit-debug-info  -fPIC -ffunction-sections -fdata-sections -fvisibility=hidden -fvisibility-inlines-hidden -o CMakeFiles/xenaudio.dir/XenAudioEngine.cpp.o -c /Volumes/Files/Github/Chordle/app/src/main/cpp/XenAudioEngine.cpp",
-  "file": "/Volumes/Files/Github/Chordle/app/src/main/cpp/XenAudioEngine.cpp"
-}
-]
