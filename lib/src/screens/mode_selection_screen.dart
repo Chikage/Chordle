@@ -26,6 +26,13 @@ extension on _HomeMode {
     _HomeMode.free => null,
     _HomeMode.overtones => ChordleMode.overtones,
   };
+
+  Color? get buttonBackgroundColor => switch (this) {
+    _HomeMode.normal => ChordleColors.green,
+    _HomeMode.extra => ChordleColors.yellow,
+    _HomeMode.free => null,
+    _HomeMode.overtones => ChordleColors.iconGray,
+  };
 }
 
 class ModeSelectionScreen extends StatelessWidget {
@@ -177,7 +184,8 @@ class _ModeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = mode == _HomeMode.normal;
+    final backgroundColor = mode.buttonBackgroundColor;
+    final filled = backgroundColor != null;
     final child = Row(
       children: [
         Expanded(
@@ -198,7 +206,7 @@ class _ModeButton extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: primary
+                  color: filled
                       ? Colors.white.withValues(alpha: 0.82)
                       : ChordleColors.muted,
                   fontSize: 12.5,
@@ -211,16 +219,20 @@ class _ModeButton extends StatelessWidget {
         const SizedBox(width: 12),
         Icon(
           Icons.arrow_forward_rounded,
-          color: primary ? Colors.white : ChordleColors.muted,
+          color: filled ? Colors.white : ChordleColors.muted,
         ),
       ],
     );
 
-    if (primary) {
+    if (filled) {
       return SizedBox(
         width: double.infinity,
         height: 64,
-        child: FilledButton(onPressed: onPressed, child: child),
+        child: FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: backgroundColor),
+          onPressed: onPressed,
+          child: child,
+        ),
       );
     }
     return SizedBox(
@@ -243,9 +255,9 @@ class _LogoMark extends StatelessWidget {
       ChordleColors.yellow,
       ChordleColors.yellow,
       ChordleColors.yellow,
-      ChordleColors.border,
-      ChordleColors.border,
-      ChordleColors.border,
+      ChordleColors.iconGray,
+      ChordleColors.iconGray,
+      ChordleColors.iconGray,
     ];
     return SizedBox(
       width: 82,

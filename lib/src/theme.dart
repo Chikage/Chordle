@@ -9,6 +9,7 @@ abstract final class ChordleColors {
   static const border = Color(0xFF3A3A3C);
   static const green = Color(0xFF6AAA64);
   static const yellow = Color(0xFFCCB757);
+  static const iconGray = Color(0xFF46484D);
   static const gray = Color(0xFF86888A);
   static const extraCorrect = Color(0xFF8EB8FF);
   static const extraNear = Color(0xFFF0A9C8);

@@ -15,8 +15,8 @@
                   <BuildableReference
                      BuildableIdentifier = "primary"
                      BlueprintIdentifier = "97C146ED1CF9000F007C117D"
-                     BuildableName = "Runner.app"
-                     BlueprintName = "Runner"
+                     BuildableName = "Chordle.app"
+                     BlueprintName = "Chordle"
                      ReferencedContainer = "container:Chordle.xcodeproj">
                   </BuildableReference>
                </EnvironmentBuildable>
@@ -33,8 +33,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "97C146ED1CF9000F007C117D"
-               BuildableName = "Runner.app"
-               BlueprintName = "Runner"
+               BuildableName = "Chordle.app"
+               BlueprintName = "Chordle"
                ReferencedContainer = "container:Chordle.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -50,8 +50,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "97C146ED1CF9000F007C117D"
-            BuildableName = "Runner.app"
-            BlueprintName = "Runner"
+            BuildableName = "Chordle.app"
+            BlueprintName = "Chordle"
             ReferencedContainer = "container:Chordle.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -62,8 +62,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "331C8080294A63A400263BE5"
-               BuildableName = "RunnerTests.xctest"
-               BlueprintName = "RunnerTests"
+               BuildableName = "ChordleTests.xctest"
+               BlueprintName = "ChordleTests"
                ReferencedContainer = "container:Chordle.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -86,7 +86,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "97C146ED1CF9000F007C117D"
-            BuildableName = "Runner.app"
+            BuildableName = "Chordle.app"
+            BlueprintName = "Chordle"
             ReferencedContainer = "container:Chordle.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -105,8 +106,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "97C146ED1CF9000F007C117D"
-            BuildableName = "Runner.app"
-            BlueprintName = "Runner"
+            BuildableName = "Chordle.app"
+            BlueprintName = "Chordle"
             ReferencedContainer = "container:Chordle.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
