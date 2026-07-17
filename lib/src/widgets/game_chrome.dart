@@ -77,12 +77,17 @@ class ChordleHeader extends StatelessWidget {
                 ],
               ),
             ),
-            IconButton(
-              onPressed: onSettings,
-              tooltip: '游戏设置',
-              icon: const Icon(Icons.settings_rounded, size: 22),
+            SizedBox(
+              width: 102,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  onPressed: onSettings,
+                  tooltip: '游戏设置',
+                  icon: const Icon(Icons.settings_rounded, size: 22),
+                ),
+              ),
             ),
-            const SizedBox(width: 54),
           ],
         ),
       ),

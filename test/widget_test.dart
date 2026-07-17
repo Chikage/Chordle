@@ -518,6 +518,30 @@ void main() {
     });
   }
 
+  testWidgets('right-aligns the settings button in the game header', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChordleHeader(
+            modeLabel: 'Normal',
+            onBack: () {},
+            onHelp: () {},
+            onSettings: () {},
+          ),
+        ),
+      ),
+    );
+
+    final headerRight = tester.getTopRight(find.byType(ChordleHeader)).dx;
+    final settingsCenter = tester
+        .getCenter(find.byIcon(Icons.settings_rounded))
+        .dx;
+
+    expect(settingsCenter, headerRight - 24);
+  });
+
   testWidgets('ten-column board fits a narrow phone viewport', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
