@@ -3,24 +3,49 @@ import 'package:flutter/material.dart';
 import '../models/chordle_mode.dart';
 import '../theme.dart';
 
-extension on ChordleMode {
+enum _HomeMode { normal, extra, free, overtones }
+
+extension on _HomeMode {
   String get label => switch (this) {
-    ChordleMode.normal => 'Normal',
-    ChordleMode.extra => 'Extra',
-    ChordleMode.overtones => 'Overtones',
+    _HomeMode.normal => 'Normal',
+    _HomeMode.extra => 'Extra',
+    _HomeMode.free => 'Free',
+    _HomeMode.overtones => 'Overtones',
   };
 
   String get description => switch (this) {
-    ChordleMode.normal => '标准十二平均律和弦听辨',
-    ChordleMode.extra => '1–72 EDO 微分音听辨',
-    ChordleMode.overtones => '基音与整数倍频听辨',
+    _HomeMode.normal => '标准十二平均律和弦听辨',
+    _HomeMode.extra => '1–72 EDO 微分音听辨',
+    _HomeMode.free => '自由设置并试听 EDO 和弦',
+    _HomeMode.overtones => '基音与整数倍频听辨',
+  };
+
+  ChordleMode? get gameMode => switch (this) {
+    _HomeMode.normal => ChordleMode.normal,
+    _HomeMode.extra => ChordleMode.extra,
+    _HomeMode.free => null,
+    _HomeMode.overtones => ChordleMode.overtones,
   };
 }
 
 class ModeSelectionScreen extends StatelessWidget {
-  const ModeSelectionScreen({required this.onModeSelected, super.key});
+  const ModeSelectionScreen({
+    required this.onModeSelected,
+    required this.onFreeSelected,
+    super.key,
+  });
 
   final ValueChanged<ChordleMode> onModeSelected;
+  final VoidCallback onFreeSelected;
+
+  void _selectMode(_HomeMode mode) {
+    final gameMode = mode.gameMode;
+    if (gameMode == null) {
+      onFreeSelected();
+    } else {
+      onModeSelected(gameMode);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,8 +64,8 @@ class ModeSelectionScreen extends StatelessWidget {
                 child: ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: maxWidth),
                   child: landscape
-                      ? _LandscapeContent(onModeSelected: onModeSelected)
-                      : _PortraitContent(onModeSelected: onModeSelected),
+                      ? _LandscapeContent(onModeSelected: _selectMode)
+                      : _PortraitContent(onModeSelected: _selectMode),
                 ),
               ),
             );
@@ -54,7 +79,7 @@ class ModeSelectionScreen extends StatelessWidget {
 class _PortraitContent extends StatelessWidget {
   const _PortraitContent({required this.onModeSelected});
 
-  final ValueChanged<ChordleMode> onModeSelected;
+  final ValueChanged<_HomeMode> onModeSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +88,7 @@ class _PortraitContent extends StatelessWidget {
       children: [
         const _Brand(),
         const SizedBox(height: 38),
-        ...ChordleMode.values.map(
+        ..._HomeMode.values.map(
           (mode) => Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: _ModeButton(
@@ -80,7 +105,7 @@ class _PortraitContent extends StatelessWidget {
 class _LandscapeContent extends StatelessWidget {
   const _LandscapeContent({required this.onModeSelected});
 
-  final ValueChanged<ChordleMode> onModeSelected;
+  final ValueChanged<_HomeMode> onModeSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -91,7 +116,7 @@ class _LandscapeContent extends StatelessWidget {
         Expanded(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: ChordleMode.values
+            children: _HomeMode.values
                 .map(
                   (mode) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -147,12 +172,12 @@ class _Brand extends StatelessWidget {
 class _ModeButton extends StatelessWidget {
   const _ModeButton({required this.mode, required this.onPressed});
 
-  final ChordleMode mode;
+  final _HomeMode mode;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final primary = mode == ChordleMode.normal;
+    final primary = mode == _HomeMode.normal;
     final child = Row(
       children: [
         Expanded(

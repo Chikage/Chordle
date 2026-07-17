@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'models/chordle_mode.dart';
+import 'screens/free_screen.dart';
 import 'screens/game_screen.dart';
 import 'screens/mode_selection_screen.dart';
 import 'theme.dart';
@@ -34,15 +35,23 @@ class _AppHome extends StatelessWidget {
       ),
       child: ModeSelectionScreen(
         onModeSelected: (mode) => _openGame(context, mode),
+        onFreeSelected: () => _openFree(context),
       ),
     );
   }
 
   Future<void> _openGame(BuildContext context, ChordleMode mode) {
+    return _openScreen(context, GameScreen(mode: mode));
+  }
+
+  Future<void> _openFree(BuildContext context) {
+    return _openScreen(context, const FreeScreen());
+  }
+
+  Future<void> _openScreen(BuildContext context, Widget screen) {
     return Navigator.of(context).push<void>(
       PageRouteBuilder<void>(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            GameScreen(mode: mode),
+        pageBuilder: (context, animation, secondaryAnimation) => screen,
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           final curved = CurvedAnimation(
             parent: animation,

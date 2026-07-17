@@ -20,7 +20,7 @@ abstract final class ChordleColors {
 }
 
 String chordleWordmarkFontFamily(TargetPlatform platform) => switch (platform) {
-  TargetPlatform.iOS => '.New York',
+  TargetPlatform.iOS => '.AppleSystemUIFontSerif',
   _ => 'serif',
 };
 

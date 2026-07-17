@@ -92,8 +92,9 @@ Future<ChordleSettings?> showNormalSettingsDialog(
 
 Future<ChordleSettings?> showExtraSettingsDialog(
   BuildContext context,
-  ChordleSettings settings,
-) {
+  ChordleSettings settings, {
+  bool freeMode = false,
+}) {
   var range = sanitizeExtraPlayableRange(
     IntRange.sorted(settings.extraLow, settings.extraHigh),
   );
@@ -106,7 +107,7 @@ Future<ChordleSettings?> showExtraSettingsDialog(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
       builder: (context, setState) => _SettingsDialog(
-        title: 'Extra 设置',
+        title: freeMode ? 'Free 设置' : 'Extra 设置',
         onSave: () => Navigator.of(dialogContext).pop(
           settings.copyWith(
             extraLow: range.lowerBound,
@@ -146,20 +147,26 @@ Future<ChordleSettings?> showExtraSettingsDialog(
               ),
             ],
           ),
-          Text('出题音域：${rangeLabel(range)} · ${extraRangeLabel(edo, range)}'),
-          const _HintText(
-            'Extra 会按当前 EDO 把八度等分；音域两端只允许选择 C，并使用 1–72 EDO 标尺模板绘制键盘刻度。',
+          Text(
+            '${freeMode ? '可选' : '出题'}音域：${rangeLabel(range)} · '
+            '${extraRangeLabel(edo, range)}',
           ),
-          _LabeledSlider(
-            label: '播放音数：$toneCount',
-            value: toneCount.toDouble(),
-            min: minChordToneCount.toDouble(),
-            max: maxChordToneCount.toDouble(),
-            divisions: maxChordToneCount - minChordToneCount,
-            onChanged: (value) => setState(
-              () => toneCount = sanitizeChordToneCount(value.round()),
+          freeMode
+              ? const _HintText('Free 暂使用 Extra 的 1–72 EDO 标尺；音域两端只允许选择 C。')
+              : const _HintText(
+                  'Extra 会按当前 EDO 把八度等分；音域两端只允许选择 C，并使用 1–72 EDO 标尺模板绘制键盘刻度。',
+                ),
+          if (!freeMode)
+            _LabeledSlider(
+              label: '播放音数：$toneCount',
+              value: toneCount.toDouble(),
+              min: minChordToneCount.toDouble(),
+              max: maxChordToneCount.toDouble(),
+              divisions: maxChordToneCount - minChordToneCount,
+              onChanged: (value) => setState(
+                () => toneCount = sanitizeChordToneCount(value.round()),
+              ),
             ),
-          ),
           _ProgramSlider(
             value: program,
             onChanged: (value) => setState(() => program = value),
@@ -194,7 +201,7 @@ Future<ChordleSettings?> showExtraSettingsDialog(
             rightLabel: '全 C 范围',
             onLeft: () => setState(() {
               range = defaultExtraPlayableRange;
-              toneCount = defaultChordToneCount;
+              if (!freeMode) toneCount = defaultChordToneCount;
               edo = defaultExtraEdo;
               program = defaultMidiProgramNumber;
               preview = false;

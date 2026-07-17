@@ -17,6 +17,9 @@ class GameInputPanel extends StatelessWidget {
     required this.input,
     this.answerText,
     this.compact = false,
+    this.playText = '播放和弦',
+    this.deleteText = '删除',
+    this.submitText = '提交',
     super.key,
   });
 
@@ -33,6 +36,9 @@ class GameInputPanel extends StatelessWidget {
   final Widget input;
   final String? answerText;
   final bool compact;
+  final String playText;
+  final String deleteText;
+  final String submitText;
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +58,8 @@ class GameInputPanel extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: audioReady ? onPlayTarget : null,
                       icon: const Icon(Icons.play_arrow_rounded, size: 21),
-                      label: const Text(
-                        '播放和弦',
+                      label: Text(
+                        playText,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -104,7 +110,7 @@ class GameInputPanel extends StatelessWidget {
                   flex: 7,
                   child: OutlinedButton(
                     onPressed: canDelete ? onDelete : null,
-                    child: const Text('删除', maxLines: 1),
+                    child: Text(deleteText, maxLines: 1),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -115,7 +121,7 @@ class GameInputPanel extends StatelessWidget {
                       backgroundColor: ChordleColors.gray,
                     ),
                     onPressed: canSubmit ? onSubmit : null,
-                    child: const Text('提交', maxLines: 1),
+                    child: Text(submitText, maxLines: 1),
                   ),
                 ),
               ],
