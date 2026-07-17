@@ -19,6 +19,11 @@ abstract final class ChordleColors {
   static const dialogMuted = Color(0xFF6E5D75);
 }
 
+String chordleWordmarkFontFamily(TargetPlatform platform) => switch (platform) {
+  TargetPlatform.iOS => '.New York',
+  _ => 'serif',
+};
+
 ThemeData buildChordleTheme() {
   final colorScheme = const ColorScheme.dark(
     primary: ChordleColors.green,

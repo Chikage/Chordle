@@ -114,23 +114,23 @@ class _Brand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _LogoMark(),
-        SizedBox(height: 18),
+        const _LogoMark(),
+        const SizedBox(height: 18),
         Text(
           'Chordle',
           style: TextStyle(
             color: ChordleColors.text,
-            fontFamily: 'serif',
+            fontFamily: chordleWordmarkFontFamily(Theme.of(context).platform),
             fontSize: 44,
             fontWeight: FontWeight.w900,
             letterSpacing: -1.5,
           ),
         ),
-        SizedBox(height: 6),
-        Text(
+        const SizedBox(height: 6),
+        const Text(
           '选择模式',
           style: TextStyle(
             color: ChordleColors.muted,
