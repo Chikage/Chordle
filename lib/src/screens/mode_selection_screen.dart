@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/chordle_mode.dart';
 import '../theme.dart';
 
-enum _HomeMode { normal, extra, free, overtones }
+enum _HomeMode { normal, extra, overtones, free }
 
 extension on _HomeMode {
   String get label => switch (this) {
