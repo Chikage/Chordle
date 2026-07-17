@@ -121,6 +121,29 @@ class AudioService extends ChangeNotifier {
     );
   }
 
+  Future<void> playFrequencies(
+    List<double> frequencies, {
+    int velocity = 104,
+    int durationMs = 1200,
+    int program = 0,
+  }) {
+    final tones = frequencies
+        .where((frequency) => frequency.isFinite && frequency > 0)
+        .map((frequency) {
+          final midiValue =
+              69.0 + 12.0 * (math.log(frequency / 440.0) / math.ln2);
+          final key = midiValue.round().clamp(0, 108);
+          return PlaybackTone(key: key, cents: (midiValue - key) * 100.0);
+        })
+        .toList(growable: false);
+    return playTones(
+      tones,
+      velocity: velocity,
+      durationMs: durationMs,
+      program: program,
+    );
+  }
+
   Future<void> allSoundOff() async {
     try {
       await _channel.invokeMethod<void>('allSoundOff');

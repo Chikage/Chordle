@@ -9,6 +9,7 @@ class ChordleSettings {
     this.extraHigh = 72,
     this.extraToneCount = 3,
     this.extraEdo = 24,
+    this.freeJiEnabled = false,
     this.overtoneLow = 8,
     this.overtoneHigh = 16,
     this.overtoneToneCount = 4,
@@ -23,6 +24,7 @@ class ChordleSettings {
   final int extraHigh;
   final int extraToneCount;
   final int extraEdo;
+  final bool freeJiEnabled;
   final int overtoneLow;
   final int overtoneHigh;
   final int overtoneToneCount;
@@ -37,6 +39,7 @@ class ChordleSettings {
     int? extraHigh,
     int? extraToneCount,
     int? extraEdo,
+    bool? freeJiEnabled,
     int? overtoneLow,
     int? overtoneHigh,
     int? overtoneToneCount,
@@ -51,6 +54,7 @@ class ChordleSettings {
       extraHigh: extraHigh ?? this.extraHigh,
       extraToneCount: extraToneCount ?? this.extraToneCount,
       extraEdo: extraEdo ?? this.extraEdo,
+      freeJiEnabled: freeJiEnabled ?? this.freeJiEnabled,
       overtoneLow: overtoneLow ?? this.overtoneLow,
       overtoneHigh: overtoneHigh ?? this.overtoneHigh,
       overtoneToneCount: overtoneToneCount ?? this.overtoneToneCount,
@@ -68,6 +72,7 @@ class ChordleSettings {
     'extraHigh': extraHigh,
     'extraToneCount': extraToneCount,
     'extraEdo': extraEdo,
+    'freeJiEnabled': freeJiEnabled,
     'overtoneLow': overtoneLow,
     'overtoneHigh': overtoneHigh,
     'overtoneToneCount': overtoneToneCount,
@@ -124,6 +129,10 @@ class ChordleSettings {
         'chord_tone_count',
       ], 3),
       extraEdo: integer(const ['extraEdo', 'extra_edo'], 24),
+      freeJiEnabled:
+          values['freeJiEnabled'] as bool? ??
+          values['free_ji_enabled'] as bool? ??
+          false,
       overtoneLow: integer(const [
         'overtoneLow',
         'overtoneRangeLow',

@@ -47,6 +47,42 @@ void main() {
     expect(collection.activeGroup.rootTone?.ratioLabel, isNull);
   });
 
+  test('EDO ratios remain unresolved until a reference step is supplied', () {
+    final collection = FreeChordCollection();
+    final groupId = collection.activeGroupId;
+    collection.addRatioTone(groupId, ratioLabel: '3/2', resolvedStep: null);
+
+    expect(collection.activeGroup.tones.single.step, lessThan(0));
+    expect(
+      collection.recalculateEdoGroup(
+        groupId: groupId,
+        stepsForRatio: (label) =>
+            pureEdoStepsForRatio(parsePositiveRatio(label), 24),
+        isPlayable: (_) => true,
+        fallbackReferenceStep: 100,
+      ),
+      FreeNoteSwapResult.swapped,
+    );
+    expect(collection.activeGroup.tones.single.step, 114);
+
+    collection.recalculateEdoGroup(
+      groupId: groupId,
+      stepsForRatio: (label) =>
+          pureEdoStepsForRatio(parsePositiveRatio(label), 24),
+      isPlayable: (_) => true,
+      fallbackReferenceStep: 101,
+    );
+    expect(collection.activeGroup.tones.single.step, 115);
+
+    collection.recalculateEdoGroup(
+      groupId: groupId,
+      stepsForRatio: (label) =>
+          pureEdoStepsForRatio(parsePositiveRatio(label), 24),
+      isPlayable: (_) => true,
+    );
+    expect(collection.activeGroup.tones.single.step, lessThan(0));
+  });
+
   test('removing the root clears the remaining ratio labels', () {
     final collection = FreeChordCollection();
     final groupId = collection.activeGroupId;
@@ -163,5 +199,85 @@ void main() {
       firstId,
     ]);
     expect(collection.activeGroupId, secondId);
+  });
+
+  test(
+    'JI ratios use an exact root frequency and remain unresolved without one',
+    () {
+      final collection = FreeChordCollection();
+      final groupId = collection.activeGroupId;
+      collection.addStep(
+        groupId,
+        138,
+        frequencyHz: 440,
+        isAbsoluteAnchor: true,
+      );
+      collection.addJiRatioTone(
+        groupId,
+        ratioLabel: '3/2',
+        approximateStep: null,
+        frequencyHz: null,
+      );
+
+      expect(
+        collection.recalculateJiGroup(
+          groupId: groupId,
+          ratioValue: (label) => parsePositiveRatio(label).value,
+          approximateStep: (_) => 152,
+          isPlayable: (_) => true,
+        ),
+        FreeNoteSwapResult.swapped,
+      );
+      expect(
+        collection.activeGroup.tones.last.frequencyHz,
+        closeTo(660, 0.000001),
+      );
+
+      collection.removeToneById(
+        groupId,
+        collection.activeGroup.tones.first.id,
+        clearRatiosWhenRemovingRoot: false,
+      );
+      collection.recalculateJiGroup(
+        groupId: groupId,
+        ratioValue: (label) => parsePositiveRatio(label).value,
+        approximateStep: (_) => 0,
+        isPlayable: (_) => true,
+      );
+      expect(collection.activeGroup.tones.single.frequencyHz, isNull);
+    },
+  );
+
+  test('JI ratio metadata is rebased after switching groups', () {
+    final collection = FreeChordCollection();
+    final firstId = collection.activeGroupId;
+    collection.addStep(firstId, 100, frequencyHz: 300, isAbsoluteAnchor: true);
+    collection.addJiRatioTone(
+      firstId,
+      ratioLabel: '3/2',
+      approximateStep: 110,
+      frequencyHz: 450,
+    );
+    final firstRatioTone = collection.activeGroup.tones.last;
+
+    final secondId = collection.addGroup();
+    collection.addStep(secondId, 120, frequencyHz: 400, isAbsoluteAnchor: true);
+    collection.addStep(secondId, 130, frequencyHz: 500, isAbsoluteAnchor: true);
+    final secondTarget = collection.activeGroup.tones.last;
+
+    expect(
+      collection.swapJiTones(
+        firstGroupId: firstId,
+        firstToneId: firstRatioTone.id,
+        secondGroupId: secondId,
+        secondToneId: secondTarget.id,
+        ratioValue: (label) => parsePositiveRatio(label).value,
+        approximateStep: (_) => 0,
+        isPlayable: (_) => true,
+      ),
+      FreeNoteSwapResult.swapped,
+    );
+    expect(secondTarget.ratioLabel, '3/2');
+    expect(secondTarget.frequencyHz, closeTo(600, 0.000001));
   });
 }

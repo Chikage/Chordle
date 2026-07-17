@@ -9,6 +9,7 @@ final class PositiveRatio {
   final int denominator;
 
   String get label => '$numerator/$denominator';
+  double get value => numerator / denominator;
 }
 
 PositiveRatio parsePositiveRatio(String text) {

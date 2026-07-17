@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../game/chord_game.dart';
 import '../game/edo_ratio.dart';
+import '../game/ji_tuning.dart';
 import '../models/free_chord_collection.dart';
 import '../services/audio_service.dart';
 import '../services/settings_service.dart';
@@ -29,7 +30,11 @@ class _FreeScreenState extends State<FreeScreen> {
   final AudioService _audio = AudioService.instance;
   final SettingsService _settingsService = SettingsService.instance;
   final FreeChordCollection _collection = FreeChordCollection();
+  final math.Random _random = math.Random();
   final ScrollController _groupScrollController = ScrollController();
+  final Map<int, GlobalKey> _groupCardKeys = <int, GlobalKey>{};
+  final Map<int, int> _lastImplicitEdoRootByGroup = <int, int>{};
+  final Map<int, int> _lastImplicitJiRootByGroup = <int, int>{};
   final ChordPuzzle _playbackContext = ChordPuzzle(
     notes: const <int>[],
     label: 'Free',
@@ -38,6 +43,7 @@ class _FreeScreenState extends State<FreeScreen> {
   ChordleSettings _settings = const ChordleSettings();
   int? _selectedStep;
   var _inputMode = _FreeInputMode.ruler;
+  var _playbackMode = _FreePlaybackMode.sequential;
   var _ratioInput = '';
   _NoteSwapSelection? _noteSwapSource;
   int? _groupSwapSourceId;
@@ -76,11 +82,13 @@ class _FreeScreenState extends State<FreeScreen> {
     if (mounted) setState(() {});
   }
 
-  IntRange get _range => sanitizeExtraPlayableRange(
-    IntRange.sorted(_settings.extraLow, _settings.extraHigh),
-  );
+  IntRange get _range => fullPianoRange;
+
+  IntRange get _stepRange => edoStepRangeForMidiRange(_edo, _range);
 
   int get _edo => sanitizeExtraEdo(_settings.extraEdo);
+
+  bool get _jiMode => _settings.freeJiEnabled;
 
   bool get _audioReady => _audio.status == AudioStatus.ready;
 
@@ -113,7 +121,12 @@ class _FreeScreenState extends State<FreeScreen> {
     unawaited(_audio.allSoundOff());
   }
 
-  Future<void> _playNow(
+  void _setPlaybackMode(_FreePlaybackMode mode) {
+    if (_isSequencePlaying || mode == _playbackMode) return;
+    setState(() => _playbackMode = mode);
+  }
+
+  Future<void> _playStepValuesNow(
     List<int> steps, {
     int velocity = 104,
     int durationMs = 1400,
@@ -130,40 +143,346 @@ class _FreeScreenState extends State<FreeScreen> {
     await _playSteps(snapshot, velocity: velocity, durationMs: durationMs);
   }
 
-  Future<void> _playSequence({required bool randomOrder}) async {
-    final playable = <_PlaybackChord>[
-      for (final group in _collection.groups)
-        if (!group.isEmpty) _PlaybackChord(group.id, List<int>.of(group.steps)),
-    ];
-    if (!_audioReady || playable.isEmpty) {
-      _showMessage('请先至少设置一组非空和弦');
-      return;
-    }
-    if (randomOrder) playable.shuffle(math.Random());
+  Future<void> _playFrequencies(
+    List<double> frequencies, {
+    int velocity = 104,
+    int durationMs = 1400,
+  }) {
+    return _audio.playFrequencies(
+      frequencies,
+      velocity: velocity,
+      durationMs: durationMs,
+      program: _settings.instrumentProgram,
+    );
+  }
 
+  Future<void> _playFrequencyValuesNow(
+    List<double> frequencies, {
+    int velocity = 104,
+    int durationMs = 1400,
+  }) async {
+    if (!_audioReady || frequencies.isEmpty) return;
+    final snapshot = List<double>.of(frequencies);
     final token = ++_playbackToken;
-    setState(() {
-      _isSequencePlaying = true;
-      _playingGroupId = null;
-    });
-
-    for (final chord in playable) {
-      if (!mounted || token != _playbackToken) return;
-      setState(() => _playingGroupId = chord.groupId);
-      await _audio.allSoundOff();
-      if (!mounted || token != _playbackToken) return;
-      await _playSteps(
-        chord.steps,
-        durationMs: _sequenceToneDuration.inMilliseconds,
-      );
-      await Future<void>.delayed(_sequenceToneDuration + _sequenceGap);
-    }
-
-    if (!mounted || token != _playbackToken) return;
     setState(() {
       _isSequencePlaying = false;
       _playingGroupId = null;
     });
+    await _audio.allSoundOff();
+    if (!mounted || token != _playbackToken) return;
+    await _playFrequencies(
+      snapshot,
+      velocity: velocity,
+      durationMs: durationMs,
+    );
+  }
+
+  FreeNoteSwapResult _recalculateJiGroup(
+    int groupId, {
+    double? fallbackReferenceHz,
+  }) {
+    return _collection.recalculateJiGroup(
+      groupId: groupId,
+      ratioValue: (label) => parsePositiveRatio(label).value,
+      approximateStep: (frequency) =>
+          approximateExtraStepForFrequency(frequency, _edo),
+      isPlayable: isPlayableJiFrequency,
+      fallbackReferenceHz: fallbackReferenceHz,
+    );
+  }
+
+  FreeNoteSwapResult _recalculateEdoGroup(
+    int groupId, {
+    int? fallbackReferenceStep,
+  }) {
+    return _collection.recalculateEdoGroup(
+      groupId: groupId,
+      stepsForRatio: (label) =>
+          pureEdoStepsForRatio(parsePositiveRatio(label), _edo),
+      isPlayable: _stepRange.contains,
+      fallbackReferenceStep: fallbackReferenceStep,
+    );
+  }
+
+  _PlaybackChord? _preparePlaybackChord(FreeChordGroup group) {
+    if (!_jiMode) {
+      final hasAbsoluteReference =
+          group.rootTone != null || group.lowestStepAnchor != null;
+      int? fallbackReferenceStep;
+      var implicitRandomRoot = false;
+      if (!hasAbsoluteReference) {
+        final relativeSteps = group.tones
+            .map((tone) => tone.ratioLabel)
+            .whereType<String>()
+            .map(
+              (label) => pureEdoStepsForRatio(parsePositiveRatio(label), _edo),
+            )
+            .toList(growable: false);
+        fallbackReferenceStep = randomEdoBaseStep(
+          relativeSteps,
+          _stepRange,
+          excludingStep: _lastImplicitEdoRootByGroup[group.id],
+          random: _random,
+        );
+        if (fallbackReferenceStep == null) {
+          _showMessage('该组比例跨度过大，无法在 A0–C8 内选择随机 EDO 根音');
+          return null;
+        }
+        _lastImplicitEdoRootByGroup[group.id] = fallbackReferenceStep;
+        implicitRandomRoot = true;
+      }
+
+      final result = _recalculateEdoGroup(
+        group.id,
+        fallbackReferenceStep: fallbackReferenceStep,
+      );
+      if (result != FreeNoteSwapResult.swapped) {
+        _showMessage(
+          result == FreeNoteSwapResult.wouldDuplicate
+              ? 'EDO 重算后产生重复音高，无法播放该组'
+              : 'EDO 重算后有音高超出 A0–C8，无法播放该组',
+        );
+        return null;
+      }
+
+      final steps = <int>[
+        for (final tone in group.tones)
+          if (_stepRange.contains(tone.step))
+            if (!implicitRandomRoot ||
+                tone.ratioLabel == null ||
+                pureEdoStepsForRatio(
+                      parsePositiveRatio(tone.ratioLabel!),
+                      _edo,
+                    ) !=
+                    0)
+              tone.step,
+      ];
+      if (steps.isEmpty) return null;
+      return _PlaybackChord.edo(group.id, steps);
+    }
+
+    final hasAbsoluteReference =
+        group.rootTone?.frequencyHz != null ||
+        group.lowestAbsoluteAnchor != null;
+    double? fallbackReferenceHz;
+    var implicitRandomRoot = false;
+    if (!hasAbsoluteReference) {
+      final ratios = group.tones
+          .map((tone) => tone.ratioLabel)
+          .whereType<String>()
+          .map(parsePositiveRatio)
+          .toList(growable: false);
+      final baseMidi = randomJiBaseMidiNote(
+        ratios,
+        excludingMidiNote: _lastImplicitJiRootByGroup[group.id],
+        random: _random,
+      );
+      if (baseMidi == null) {
+        _showMessage('该组比例跨度过大，无法在 A0–C8 内选择随机根音');
+        return null;
+      }
+      _lastImplicitJiRootByGroup[group.id] = baseMidi;
+      fallbackReferenceHz = midiNoteFrequency(baseMidi);
+      implicitRandomRoot = true;
+    }
+
+    final result = _recalculateJiGroup(
+      group.id,
+      fallbackReferenceHz: fallbackReferenceHz,
+    );
+    if (result != FreeNoteSwapResult.swapped) {
+      _showMessage(
+        result == FreeNoteSwapResult.wouldDuplicate
+            ? 'JI 重算后产生重复频率，无法播放该组'
+            : 'JI 重算后有频率超出 A0–C8，无法播放该组',
+      );
+      return null;
+    }
+
+    final frequencies = <double>[
+      for (final tone in group.tones)
+        if (tone.frequencyHz case final frequency?)
+          if (!implicitRandomRoot || tone.ratioLabel != '1/1') frequency,
+    ];
+    if (frequencies.isEmpty) return null;
+    return _PlaybackChord.ji(group.id, frequencies);
+  }
+
+  Future<void> _playGroupNow(int groupId) async {
+    final group = _collection.groupById(groupId);
+    if (!_audioReady || group == null || group.isEmpty) return;
+    final initialChord = _preparePlaybackChord(group);
+    if (initialChord == null) return;
+    var chord = initialChord;
+
+    final token = ++_playbackToken;
+    setState(() {
+      _clearSwapSelections();
+      _isSequencePlaying = true;
+      _playingGroupId = groupId;
+    });
+    _scheduleScrollToGroup(groupId);
+
+    while (mounted && token == _playbackToken) {
+      await _audio.allSoundOff();
+      if (!mounted || token != _playbackToken) return;
+      await _playPreparedChord(chord);
+      await Future<void>.delayed(_sequenceToneDuration + _sequenceGap);
+      if (!mounted || token != _playbackToken) return;
+      final currentGroup = _collection.groupById(groupId);
+      if (currentGroup == null || currentGroup.isEmpty) break;
+      final nextChord = _preparePlaybackChord(currentGroup);
+      if (nextChord == null) break;
+      chord = nextChord;
+      setState(() => _playingGroupId = groupId);
+    }
+
+    if (!mounted || token != _playbackToken) return;
+    setState(_stopPlaybackState);
+  }
+
+  Future<void> _playPreparedChord(_PlaybackChord chord) {
+    if (chord.frequencies != null) {
+      return _playFrequencies(
+        chord.frequencies!,
+        durationMs: _sequenceToneDuration.inMilliseconds,
+      );
+    }
+    return _playSteps(
+      chord.steps!,
+      durationMs: _sequenceToneDuration.inMilliseconds,
+    );
+  }
+
+  Future<void> _playToneNow(int groupId, int toneId) async {
+    final group = _collection.groupById(groupId);
+    var tone = group?.toneById(toneId);
+    if (group == null || tone == null) return;
+    if (_jiMode) {
+      if (tone.frequencyHz == null) {
+        if (_preparePlaybackChord(group) == null) return;
+        tone = group.toneById(toneId);
+        if (mounted) setState(() {});
+      }
+      final frequency = tone?.frequencyHz;
+      if (frequency != null) {
+        await _playFrequencyValuesNow(
+          <double>[frequency],
+          velocity: 92,
+          durationMs: 700,
+        );
+      }
+      return;
+    }
+    if (tone.step < 0) {
+      if (_preparePlaybackChord(group) == null) return;
+      tone = group.toneById(toneId);
+      if (mounted) setState(() {});
+    }
+    if (tone == null || !_stepRange.contains(tone.step)) return;
+    await _playStepValuesNow(<int>[tone.step], velocity: 92, durationMs: 700);
+  }
+
+  Future<void> _playSequence() async {
+    final groupIds = <int>[
+      for (final group in _collection.groups)
+        if (!group.isEmpty) group.id,
+    ];
+    if (!_audioReady || groupIds.isEmpty) {
+      _showMessage('请先至少设置一组非空和弦');
+      return;
+    }
+
+    final token = ++_playbackToken;
+    setState(() {
+      _clearSwapSelections();
+      _isSequencePlaying = true;
+      _playingGroupId = null;
+    });
+
+    while (mounted && token == _playbackToken) {
+      final cycleGroupIds = List<int>.of(groupIds);
+      if (_playbackMode == _FreePlaybackMode.random) {
+        cycleGroupIds.shuffle(_random);
+      }
+      var playedAny = false;
+
+      for (final groupId in cycleGroupIds) {
+        if (!mounted || token != _playbackToken) return;
+        final group = _collection.groupById(groupId);
+        if (group == null || group.isEmpty) continue;
+        final chord = _preparePlaybackChord(group);
+        if (chord == null) continue;
+        playedAny = true;
+        setState(() => _playingGroupId = chord.groupId);
+        _scheduleScrollToGroup(chord.groupId);
+        await _audio.allSoundOff();
+        if (!mounted || token != _playbackToken) return;
+        await _playPreparedChord(chord);
+        await Future<void>.delayed(_sequenceToneDuration + _sequenceGap);
+      }
+
+      if (!playedAny) break;
+    }
+
+    if (!mounted || token != _playbackToken) return;
+    setState(_stopPlaybackState);
+  }
+
+  GlobalKey _groupCardKey(int groupId) =>
+      _groupCardKeys.putIfAbsent(groupId, GlobalKey.new);
+
+  void _scheduleScrollToGroup(int groupId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_scrollToGroup(groupId));
+    });
+  }
+
+  Future<void> _scrollToGroup(int groupId) async {
+    if (!mounted ||
+        !_isSequencePlaying ||
+        _playingGroupId != groupId ||
+        !_groupScrollController.hasClients) {
+      return;
+    }
+
+    var cardContext = _groupCardKeys[groupId]?.currentContext;
+    if (cardContext == null) {
+      final index = _collection.groupPosition(groupId);
+      if (index < 0) return;
+      final groupCount = _collection.groups.length;
+      final position = _groupScrollController.position;
+      final target = groupCount <= 1
+          ? 0.0
+          : position.maxScrollExtent * index / (groupCount - 1);
+      await _groupScrollController.animateTo(
+        target.clamp(position.minScrollExtent, position.maxScrollExtent),
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+      if (!mounted ||
+          !_isSequencePlaying ||
+          _playingGroupId != groupId ||
+          !_groupScrollController.hasClients) {
+        return;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      cardContext = _groupCardKeys[groupId]?.currentContext;
+    }
+
+    if (cardContext == null ||
+        !cardContext.mounted ||
+        !mounted ||
+        !_isSequencePlaying ||
+        _playingGroupId != groupId) {
+      return;
+    }
+    await Scrollable.ensureVisible(
+      cardContext,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _cancelPlaybackForEdit() {
@@ -178,8 +497,20 @@ class _FreeScreenState extends State<FreeScreen> {
 
   void _selectStep(int step) {
     setState(() => _selectedStep = step);
-    if (_settings.keyPitchPreviewEnabled && _audioReady) {
-      unawaited(_playNow(<int>[step], velocity: 92, durationMs: 520));
+    if (_audioReady) {
+      if (_jiMode) {
+        unawaited(
+          _playFrequencyValuesNow(
+            <double>[frequencyForExtraStep(step, _edo)],
+            velocity: 92,
+            durationMs: 520,
+          ),
+        );
+      } else {
+        unawaited(
+          _playStepValuesNow(<int>[step], velocity: 92, durationMs: 520),
+        );
+      }
     }
   }
 
@@ -220,23 +551,96 @@ class _FreeScreenState extends State<FreeScreen> {
 
   void _addRatioTone() {
     final group = _activeGroup;
-    final root = group.rootTone;
-    if (root == null) {
-      _showMessage('请先长按当前和弦中的一个音，将其设为根音');
-      return;
-    }
-
     late final PositiveRatio ratio;
     try {
       ratio = parsePositiveRatio(_ratioInput);
     } on FormatException catch (error) {
-      _showMessage(error.message);
+      _showMessage(error.message.toString());
+      return;
+    }
+    if (group.tones.any((tone) => tone.ratioLabel == ratio.label)) {
+      _showMessage('当前和弦中已有比例 ${ratio.label}');
       return;
     }
 
+    if (_jiMode) {
+      final referenceHz =
+          group.rootTone?.frequencyHz ??
+          group.lowestAbsoluteAnchor?.frequencyHz;
+      final frequency = referenceHz == null ? null : referenceHz * ratio.value;
+      if (referenceHz == null && ratio.numerator == ratio.denominator) {
+        _showMessage('隐含随机根音不会加入和弦，请输入 1/1 以外的比例');
+        return;
+      }
+      if (frequency != null && !isPlayableJiFrequency(frequency)) {
+        _showMessage('${ratio.label} 的精确频率超出 A0–C8');
+        return;
+      }
+      if (frequency != null &&
+          group.tones.any(
+            (tone) =>
+                tone.frequencyHz != null &&
+                (tone.frequencyHz! - frequency).abs() <= 0.000001,
+          )) {
+        _showMessage('${ratio.label} 与当前和弦中的频率重复');
+        return;
+      }
+      setState(() {
+        _cancelPlaybackForEdit();
+        _clearSwapSelections();
+        _collection.addJiRatioTone(
+          group.id,
+          ratioLabel: ratio.label,
+          approximateStep: frequency == null
+              ? null
+              : approximateExtraStepForFrequency(frequency, _edo),
+          frequencyHz: frequency,
+        );
+        _ratioInput = '';
+        _selectedStep = null;
+      });
+      _showMessage(
+        frequency == null
+            ? '已加入 ${ratio.label}；播放时将随机选择隐含根音'
+            : '已加入 ${frequencyLabel(frequency)} · ${ratio.label}',
+      );
+      return;
+    }
+
+    final root = group.rootTone;
+    final reference = root ?? group.lowestStepAnchor;
     final relativeSteps = pureEdoStepsForRatio(ratio, _edo);
-    final targetStep = root.step + relativeSteps;
-    final playableSteps = extraStepRangeForMidiRange(_edo, _range);
+    if (reference == null) {
+      if (relativeSteps == 0) {
+        _showMessage('隐含随机根音不会加入和弦，请输入 1/1 以外的比例');
+        return;
+      }
+      final duplicatesRelativeStep = group.tones
+          .map((tone) => tone.ratioLabel)
+          .whereType<String>()
+          .map((label) => pureEdoStepsForRatio(parsePositiveRatio(label), _edo))
+          .contains(relativeSteps);
+      if (duplicatesRelativeStep) {
+        _showMessage('${ratio.label} 与已有比例在 $_edo EDO 中映射到相同步数');
+        return;
+      }
+      setState(() {
+        _cancelPlaybackForEdit();
+        _clearSwapSelections();
+        _collection.addRatioTone(
+          group.id,
+          ratioLabel: ratio.label,
+          resolvedStep: null,
+        );
+        _ratioInput = '';
+        _selectedStep = null;
+      });
+      _showMessage('已加入 ${ratio.label}；播放时将随机选择隐含 EDO 根音');
+      return;
+    }
+
+    final targetStep = reference.step + relativeSteps;
+    final playableSteps = _stepRange;
     if (!playableSteps.contains(targetStep)) {
       _showMessage(
         '${ratio.label} 对应 ${relativeSteps >= 0 ? '+' : ''}$relativeSteps Step，超出当前音域',
@@ -245,8 +649,8 @@ class _FreeScreenState extends State<FreeScreen> {
     }
 
     final existing = group.toneAtStep(targetStep);
-    if (existing != null && group.isRoot(existing)) {
-      _showMessage('${ratio.label} 在 $_edo EDO 中映射到根音（0 Step）');
+    if (existing != null && existing.id == reference.id) {
+      _showMessage('${ratio.label} 在 $_edo EDO 中映射到参考音（0 Step）');
       return;
     }
 
@@ -254,7 +658,12 @@ class _FreeScreenState extends State<FreeScreen> {
       _cancelPlaybackForEdit();
       _clearSwapSelections();
       if (existing == null) {
-        _collection.addStep(group.id, targetStep, ratioLabel: ratio.label);
+        _collection.addStep(
+          group.id,
+          targetStep,
+          ratioLabel: ratio.label,
+          isAbsoluteAnchor: false,
+        );
       } else {
         _collection.setRatioLabel(group.id, targetStep, ratio.label);
       }
@@ -276,20 +685,45 @@ class _FreeScreenState extends State<FreeScreen> {
       _showMessage('当前和弦中已有 ${extraStepLabel(step, _edo)}');
       return;
     }
+    var recalculation = FreeNoteSwapResult.swapped;
     setState(() {
       _cancelPlaybackForEdit();
       _clearSwapSelections();
-      _collection.addStep(_collection.activeGroupId, step);
+      _collection.addStep(
+        _collection.activeGroupId,
+        step,
+        frequencyHz: _jiMode ? frequencyForExtraStep(step, _edo) : null,
+        isAbsoluteAnchor: true,
+      );
+      recalculation = _jiMode
+          ? _recalculateJiGroup(_collection.activeGroupId)
+          : _recalculateEdoGroup(_collection.activeGroupId);
       _selectedStep = null;
     });
+    if (recalculation == FreeNoteSwapResult.outOfRange) {
+      _showMessage('参考音已加入，但现有比例重算后超出 A0–C8');
+    } else if (recalculation == FreeNoteSwapResult.wouldDuplicate) {
+      _showMessage('参考音已加入，但现有比例重算后产生重复音高');
+    }
   }
 
   void _deleteLastStep() {
     if (_activeGroup.isEmpty) return;
+    final groupId = _collection.activeGroupId;
+    final toneId = _activeGroup.tones.last.id;
     setState(() {
       _cancelPlaybackForEdit();
       _clearSwapSelections();
-      _collection.deleteLastStep(_collection.activeGroupId);
+      _collection.removeToneById(
+        groupId,
+        toneId,
+        clearRatiosWhenRemovingRoot: false,
+      );
+      if (_jiMode) {
+        _recalculateJiGroup(groupId);
+      } else {
+        _recalculateEdoGroup(groupId);
+      }
       _ratioInput = '';
     });
   }
@@ -300,6 +734,8 @@ class _FreeScreenState extends State<FreeScreen> {
       _cancelPlaybackForEdit();
       _clearSwapSelections();
       _collection.clearGroup(_collection.activeGroupId);
+      _lastImplicitEdoRootByGroup.remove(_collection.activeGroupId);
+      _lastImplicitJiRootByGroup.remove(_collection.activeGroupId);
       _selectedStep = null;
       _ratioInput = '';
     });
@@ -368,6 +804,8 @@ class _FreeScreenState extends State<FreeScreen> {
       _cancelPlaybackForEdit();
       _clearSwapSelections();
       _collection.removeGroup(groupId);
+      _lastImplicitEdoRootByGroup.remove(groupId);
+      _lastImplicitJiRootByGroup.remove(groupId);
       _selectedStep = null;
       _ratioInput = '';
     });
@@ -377,7 +815,11 @@ class _FreeScreenState extends State<FreeScreen> {
     setState(() {
       _cancelPlaybackForEdit();
       _noteSwapSource = null;
-      _collection.sortGroup(groupId);
+      if (_jiMode) {
+        _collection.sortJiGroup(groupId);
+      } else {
+        _collection.sortGroup(groupId);
+      }
     });
   }
 
@@ -405,13 +847,18 @@ class _FreeScreenState extends State<FreeScreen> {
     _showMessage('两组和弦的位置已交换');
   }
 
-  Future<void> _showNoteActions(int groupId, int step) async {
+  Future<void> _showNoteActions(int groupId, int toneId) async {
     final groupPosition = _collection.groupPosition(groupId);
     final group = _collection.groupById(groupId);
-    final tone = group?.toneAtStep(step);
+    final tone = group?.toneById(toneId);
     if (groupPosition < 0 || group == null || tone == null) return;
     final isRoot = group.isRoot(tone);
-    final label = extraStepLabel(step, _edo);
+    final label = _jiMode
+        ? frequencyLabel(tone.frequencyHz)
+        : tone.step < 0
+        ? '待随机'
+        : extraStepLabel(tone.step, _edo);
+    final canSetRoot = _jiMode ? tone.frequencyHz != null : tone.step >= 0;
     final action = await showModalBottomSheet<_NoteAction>(
       context: context,
       showDragHandle: true,
@@ -426,10 +873,18 @@ class _FreeScreenState extends State<FreeScreen> {
             ListTile(
               leading: Icon(isRoot ? Icons.flag_outlined : Icons.flag_rounded),
               title: Text(isRoot ? '取消根音' : '设为根音'),
-              subtitle: Text(isRoot ? '同时清除本组比例标签' : '该音将作为比例输入的 1/1'),
-              onTap: () => Navigator.of(
-                sheetContext,
-              ).pop(isRoot ? _NoteAction.clearRoot : _NoteAction.setRoot),
+              subtitle: Text(
+                isRoot
+                    ? '改用输入的最低音；没有时播放会随机选择隐含根音'
+                    : canSetRoot
+                    ? '该音将作为比例输入的 1/1'
+                    : '该比例音尚无绝对音高，请先播放和弦',
+              ),
+              onTap: !isRoot && !canSetRoot
+                  ? null
+                  : () => Navigator.of(
+                      sheetContext,
+                    ).pop(isRoot ? _NoteAction.clearRoot : _NoteAction.setRoot),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline_rounded),
@@ -454,20 +909,35 @@ class _FreeScreenState extends State<FreeScreen> {
         setState(() {
           _cancelPlaybackForEdit();
           _clearSwapSelections();
-          _collection.removeStep(groupId, step);
+          _collection.removeToneById(
+            groupId,
+            toneId,
+            clearRatiosWhenRemovingRoot: false,
+          );
+          if (_jiMode) {
+            _recalculateJiGroup(groupId);
+          } else {
+            _recalculateEdoGroup(groupId);
+          }
           _ratioInput = '';
         });
       case _NoteAction.swap:
         setState(() {
           _groupSwapSourceId = null;
-          _noteSwapSource = _NoteSwapSelection(groupId, step);
+          _noteSwapSource = _NoteSwapSelection(groupId, toneId);
         });
         _showMessage('请点击其他和弦组中要交换的音');
       case _NoteAction.setRoot:
         setState(() {
           _cancelPlaybackForEdit();
           _clearSwapSelections();
-          _collection.setRoot(groupId, step);
+          if (_jiMode) {
+            _collection.setJiRoot(groupId, toneId);
+            _recalculateJiGroup(groupId);
+          } else {
+            _collection.setRoot(groupId, tone.step, clearRatioLabels: false);
+            _recalculateEdoGroup(groupId);
+          }
           _ratioInput = '';
         });
         _showMessage('$label 已设为根音 1/1');
@@ -475,20 +945,25 @@ class _FreeScreenState extends State<FreeScreen> {
         setState(() {
           _cancelPlaybackForEdit();
           _clearSwapSelections();
-          _collection.clearRoot(groupId);
+          _collection.clearRoot(groupId, clearRatioLabels: false);
+          if (_jiMode) {
+            _recalculateJiGroup(groupId);
+          } else {
+            _recalculateEdoGroup(groupId);
+          }
           _ratioInput = '';
         });
-        _showMessage('已取消根音并清除本组比例标签');
+        _showMessage('已取消根音，改用输入的最低音或播放时随机隐含根音');
     }
   }
 
-  void _handleNoteTap(int groupId, int step) {
+  void _handleNoteTap(int groupId, int toneId) {
     final source = _noteSwapSource;
     if (source == null) {
-      unawaited(_playNow(<int>[step], velocity: 92, durationMs: 700));
+      unawaited(_playToneNow(groupId, toneId));
       return;
     }
-    if (source.groupId == groupId && source.step == step) {
+    if (source.groupId == groupId && source.toneId == toneId) {
       setState(() => _noteSwapSource = null);
       _showMessage('已取消音交换');
       return;
@@ -496,20 +971,30 @@ class _FreeScreenState extends State<FreeScreen> {
 
     final firstTone = _collection
         .groupById(source.groupId)
-        ?.toneAtStep(source.step);
-    final secondTone = _collection.groupById(groupId)?.toneAtStep(step);
+        ?.toneById(source.toneId);
+    final secondTone = _collection.groupById(groupId)?.toneById(toneId);
     final rebaseRatio =
         firstTone?.ratioLabel != null || secondTone?.ratioLabel != null;
-    final playableSteps = extraStepRangeForMidiRange(_edo, _range);
-    final result = _collection.swapSteps(
-      firstGroupId: source.groupId,
-      firstStep: source.step,
-      secondGroupId: groupId,
-      secondStep: step,
-      stepsForRatio: (ratioLabel) =>
-          pureEdoStepsForRatio(parsePositiveRatio(ratioLabel), _edo),
-      isPlayable: playableSteps.contains,
-    );
+    final result = _jiMode
+        ? _collection.swapJiTones(
+            firstGroupId: source.groupId,
+            firstToneId: source.toneId,
+            secondGroupId: groupId,
+            secondToneId: toneId,
+            ratioValue: (label) => parsePositiveRatio(label).value,
+            approximateStep: (frequency) =>
+                approximateExtraStepForFrequency(frequency, _edo),
+            isPlayable: isPlayableJiFrequency,
+          )
+        : _collection.swapSteps(
+            firstGroupId: source.groupId,
+            firstStep: firstTone?.step ?? 0,
+            secondGroupId: groupId,
+            secondStep: secondTone?.step ?? 0,
+            stepsForRatio: (ratioLabel) =>
+                pureEdoStepsForRatio(parsePositiveRatio(ratioLabel), _edo),
+            isPlayable: _stepRange.contains,
+          );
     switch (result) {
       case FreeNoteSwapResult.swapped:
         setState(() {
@@ -517,15 +1002,15 @@ class _FreeScreenState extends State<FreeScreen> {
           _noteSwapSource = null;
           _ratioInput = '';
         });
-        _showMessage(rebaseRatio ? '两个音已交换；比例音已按新组根音或最低音重新计算' : '两个音已交换');
+        _showMessage(rebaseRatio ? '两个音已交换；比例音已按新组参考重新计算' : '两个音已交换');
       case FreeNoteSwapResult.sameGroup:
         _showMessage('只能与其他和弦组中的音交换');
       case FreeNoteSwapResult.sameNote:
         _showMessage('两个音相同，请选择其他音');
       case FreeNoteSwapResult.wouldDuplicate:
-        _showMessage('按新组参考音重算后会产生重复音，请选择其他音');
+        _showMessage('按新组参考重算后会产生重复音，请选择其他音');
       case FreeNoteSwapResult.outOfRange:
-        _showMessage('按新组参考音重算后超出当前音域，请选择其他音');
+        _showMessage(_jiMode ? '精确频率超出 A0–C8，请选择其他音' : '重算后超出当前音域，请选择其他音');
       case FreeNoteSwapResult.missingGroupOrNote:
         setState(() => _noteSwapSource = null);
         _showMessage('原音已不存在，请重新选择');
@@ -535,6 +1020,7 @@ class _FreeScreenState extends State<FreeScreen> {
   Future<void> _openSettings() async {
     _stopPlayback();
     final previousEdo = _edo;
+    final previousJiMode = _jiMode;
     final next = await showExtraSettingsDialog(
       context,
       _settings,
@@ -543,22 +1029,17 @@ class _FreeScreenState extends State<FreeScreen> {
     if (next == null || !mounted) return;
 
     final nextEdo = sanitizeExtraEdo(next.extraEdo);
-    final nextRange = sanitizeExtraPlayableRange(
-      IntRange.sorted(next.extraLow, next.extraHigh),
-    );
-    final nextStepRange = extraStepRangeForMidiRange(nextEdo, nextRange);
     final hadTones = _collection.totalToneCount > 0;
-    var removedForRange = 0;
 
     setState(() {
       _settings = next;
       _selectedStep = null;
       _ratioInput = '';
       _clearSwapSelections();
-      if (previousEdo != nextEdo) {
+      if (previousJiMode != next.freeJiEnabled || previousEdo != nextEdo) {
         _collection.clearAllSteps();
-      } else {
-        removedForRange = _collection.retainSteps(nextStepRange.contains);
+        _lastImplicitEdoRootByGroup.clear();
+        _lastImplicitJiRootByGroup.clear();
       }
     });
     await _settingsService.save(next);
@@ -566,10 +1047,10 @@ class _FreeScreenState extends State<FreeScreen> {
     await _audio.prepare(next.instrumentProgram);
     if (!mounted) return;
 
-    if (previousEdo != nextEdo && hadTones) {
-      _showMessage('EDO 已更改，全部和弦组已清空');
-    } else if (removedForRange > 0) {
-      _showMessage('已移除新音域之外的音');
+    if (previousJiMode != next.freeJiEnabled && hadTones) {
+      _showMessage('JI 模式已切换，全部和弦组已清空');
+    } else if (previousEdo != nextEdo && hadTones) {
+      _showMessage('EDO 参考尺已更改，全部和弦组已清空');
     }
   }
 
@@ -596,9 +1077,11 @@ class _FreeScreenState extends State<FreeScreen> {
           child: const SingleChildScrollView(
             child: Text(
               '使用“添加和弦”建立多组和弦，先选择要编辑的组，再从 EDO 标尺加入音高。在输入区域上下滑动，可在刻度尺和数字比例键盘之间切换。\n\n'
-              '长按组内的音可将它设为根音 1/1。随后输入 3/2、5/4 等比例并点“按比例加入”，会用纯 EDO 的逐质数取整算法计算相对 Step，并将音名与约分后的比例分行保留。\n\n'
-              '长按音还可选择删除或进入跨组音交换；带比例标签的音进入新组后，会按新组根音重新计算，没有根音时改用该组最低音。每组的“从低到高”会排序组内音，“交换整组”需要依次选择两组。顺序播放按列表次序播放全部非空组；随机播放会打乱后各播放一次。\n\n'
-              'Free 目前复用 Extra 的 1–72 EDO 输入标尺与设置，后续可独立扩展。',
+              '长按组内的音可将它设为根音 1/1。随后输入 3/2、5/4 等比例并点“按比例加入”，会用纯 EDO 的逐质数取整算法计算相对 Step；未指定根音时使用输入的最低音，整组只有比例时则随机选择隐含 EDO 根音，且不播放该根音本身。\n\n'
+              '设置中开启 JI 后，比例不再量化到 EDO，而是按根音或绝对最低音的精确频率比播放，卡片仅显示频率和比例。若整组只有比例而没有绝对参考，同样会按 Overtones 的低音权重随机选择隐含根音。\n\n'
+              '长按音还可选择删除或进入跨组音交换；带比例标签的音进入新组后，会按新组根音重新计算，没有根音时改用该组最低音。每组的“从低到高”会排序组内音，“交换整组”需要依次选择两组。\n\n'
+              '上方“顺序播放/随机播放”只选择播放策略，点击下方“播放和弦”会循环播放全部非空组；单组播放也会持续循环，直到点击“停止播放”。每轮会为无参考的 EDO/JI 组选择不同隐含根音，播放期间列表会自动滚动到当前组并收起编辑按钮。\n\n'
+              'Free 使用 Extra 的 1–72 EDO 标尺模板，但拥有独立的 A0–C8 全音域，并以 C4 作为标尺默认显示中心。',
             ),
           ),
         ),
@@ -644,7 +1127,9 @@ class _FreeScreenState extends State<FreeScreen> {
                     onSettings: () => unawaited(_openSettings()),
                   ),
                   _FreeStatusBar(
-                    detailText: '$_edo EDO · ${extraRangeLabel(_edo, _range)}',
+                    detailText: _jiMode
+                        ? 'JI 精确比例 · A0–C8'
+                        : '$_edo EDO · A0–C8',
                     groupCount: _collection.groups.length,
                     toneCount: _collection.totalToneCount,
                     audioStatus: _audio.status,
@@ -728,23 +1213,21 @@ class _FreeScreenState extends State<FreeScreen> {
       groupSwapSourceId: _groupSwapSourceId,
       audioReady: _audioReady,
       isSequencePlaying: _isSequencePlaying,
+      playbackMode: _playbackMode,
+      jiMode: _jiMode,
       scrollController: _groupScrollController,
+      groupCardKey: _groupCardKey,
       edo: _edo,
       onAddGroup: _addGroup,
-      onPlaySequential: () => unawaited(_playSequence(randomOrder: false)),
-      onPlayRandom: () => unawaited(_playSequence(randomOrder: true)),
-      onStop: _stopPlayback,
+      onPlaybackModeChanged: _setPlaybackMode,
       onSelectGroup: _selectGroup,
-      onPlayGroup: (groupId) {
-        final group = _collection.groupById(groupId);
-        if (group != null) unawaited(_playNow(group.steps));
-      },
+      onPlayGroup: (groupId) => unawaited(_playGroupNow(groupId)),
       onSortGroup: _sortGroup,
       onSwapGroup: _handleGroupSwap,
       onDeleteGroup: (groupId) => unawaited(_deleteGroup(groupId)),
       onNoteTap: _handleNoteTap,
-      onNoteLongPress: (groupId, step) =>
-          unawaited(_showNoteActions(groupId, step)),
+      onNoteLongPress: (groupId, toneId) =>
+          unawaited(_showNoteActions(groupId, toneId)),
     );
   }
 
@@ -753,38 +1236,60 @@ class _FreeScreenState extends State<FreeScreen> {
     final group = _activeGroup;
     final valueColors = <int, Color>{
       for (final tone in group.tones)
-        tone.step: group.isRoot(tone)
-            ? ChordleColors.yellow
-            : ChordleColors.green,
+        if (tone.step >= 0)
+          tone.step: group.isRoot(tone)
+              ? ChordleColors.yellow
+              : ChordleColors.green,
     };
     final labels = group.tones
         .map(
-          (tone) => tone.ratioLabel == null
+          (tone) => _jiMode
+              ? '${frequencyLabel(tone.frequencyHz)}${tone.ratioLabel == null ? '' : ' ${tone.ratioLabel}'}'
+              : tone.ratioLabel == null
               ? extraStepLabel(tone.step, _edo)
-              : '${extraStepLabel(tone.step, _edo)} ${tone.ratioLabel}',
+              : '${tone.step < 0 ? '待随机' : extraStepLabel(tone.step, _edo)} ${tone.ratioLabel}',
         )
         .join('  ');
     final groupNumber = _collection.groupPosition(group.id) + 1;
     final root = group.rootTone;
+    final lowestAnchor = group.lowestAbsoluteAnchor;
+    final lowestStepAnchor = group.lowestStepAnchor;
     final ratioMode = _inputMode == _FreeInputMode.ratio;
+    final hasPlayableGroup = _collection.groups.any(
+      (candidate) => !candidate.isEmpty,
+    );
     final selectedText = ratioMode
-        ? root == null
-              ? '比例输入 · 请先设置根音'
+        ? _jiMode
+              ? root?.frequencyHz != null
+                    ? '根音 ${frequencyLabel(root!.frequencyHz)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
+                    : lowestAnchor?.frequencyHz != null
+                    ? '最低音 ${frequencyLabel(lowestAnchor!.frequencyHz)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
+                    : 'JI 比例输入 · 播放时随机隐含根音'
+              : root == null
+              ? lowestStepAnchor == null
+                    ? 'EDO 比例输入 · 播放时随机隐含根音'
+                    : '最低音 ${extraStepLabel(lowestStepAnchor.step, _edo)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
               : '根音 ${extraStepLabel(root.step, _edo)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
         : selected == null
-        ? '未选 EDO 音'
+        ? (_jiMode ? '未选绝对参考音' : '未选 EDO 音')
+        : _jiMode
+        ? '选中 ${frequencyLabel(frequencyForExtraStep(selected, _edo))}'
         : '选中 ${extraStepLabel(selected, _edo)}';
 
     return GameInputPanel(
       selectedText: selectedText,
       confirmText: ratioMode ? '按比例加入' : '加入和弦',
-      canConfirm: ratioMode
-          ? root != null && _ratioInput.isNotEmpty
-          : selected != null,
+      canConfirm: ratioMode ? _ratioInput.isNotEmpty : selected != null,
       canDelete: !group.isEmpty,
       canSubmit: !group.isEmpty,
-      audioReady: _audioReady && !group.isEmpty,
-      onPlayTarget: () => unawaited(_playNow(group.steps)),
+      audioReady: _isSequencePlaying || (_audioReady && hasPlayableGroup),
+      onPlayTarget: _isSequencePlaying
+          ? _stopPlayback
+          : () => unawaited(_playSequence()),
+      playText: _isSequencePlaying ? '停止播放' : '播放和弦',
+      playIcon: _isSequencePlaying
+          ? Icons.stop_rounded
+          : Icons.play_arrow_rounded,
       onConfirm: ratioMode ? _addRatioTone : _addSelectedStep,
       onDelete: _deleteLastStep,
       onSubmit: _clearActiveChord,
@@ -802,6 +1307,7 @@ class _FreeScreenState extends State<FreeScreen> {
             edo: _edo,
             lowMidi: _range.lowerBound,
             highMidi: _range.upperBound,
+            initialCenterMidi: 60,
             selectedStep: selected,
             valueColors: valueColors,
             onStepPressed: _selectStep,
@@ -905,12 +1411,13 @@ class _FreeChordList extends StatelessWidget {
     required this.groupSwapSourceId,
     required this.audioReady,
     required this.isSequencePlaying,
+    required this.playbackMode,
+    required this.jiMode,
     required this.scrollController,
+    required this.groupCardKey,
     required this.edo,
     required this.onAddGroup,
-    required this.onPlaySequential,
-    required this.onPlayRandom,
-    required this.onStop,
+    required this.onPlaybackModeChanged,
     required this.onSelectGroup,
     required this.onPlayGroup,
     required this.onSortGroup,
@@ -927,12 +1434,13 @@ class _FreeChordList extends StatelessWidget {
   final int? groupSwapSourceId;
   final bool audioReady;
   final bool isSequencePlaying;
+  final _FreePlaybackMode playbackMode;
+  final bool jiMode;
   final ScrollController scrollController;
+  final GlobalKey Function(int groupId) groupCardKey;
   final int edo;
   final VoidCallback onAddGroup;
-  final VoidCallback onPlaySequential;
-  final VoidCallback onPlayRandom;
-  final VoidCallback onStop;
+  final ValueChanged<_FreePlaybackMode> onPlaybackModeChanged;
   final ValueChanged<int> onSelectGroup;
   final ValueChanged<int> onPlayGroup;
   final ValueChanged<int> onSortGroup;
@@ -943,7 +1451,6 @@ class _FreeChordList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasPlayableGroup = groups.any((group) => !group.isEmpty);
     final interactionHint = noteSwapSource != null
         ? '交换音：点击其他和弦组中的目标音'
         : groupSwapSourceId != null
@@ -959,40 +1466,43 @@ class _FreeChordList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: onAddGroup,
-                  icon: const Icon(Icons.add_rounded, size: 19),
-                  label: const Text('添加和弦'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: audioReady && hasPlayableGroup
-                      ? onPlaySequential
-                      : null,
-                  icon: const Icon(Icons.playlist_play_rounded, size: 20),
-                  label: const Text('顺序播放'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: audioReady && hasPlayableGroup
-                      ? onPlayRandom
-                      : null,
-                  icon: const Icon(Icons.shuffle_rounded, size: 18),
-                  label: const Text('随机播放'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: isSequencePlaying ? onStop : null,
-                  icon: const Icon(Icons.stop_rounded, size: 18),
-                  label: const Text('停止'),
-                ),
-              ],
+          if (!isSequencePlaying)
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: onAddGroup,
+                    icon: const Icon(Icons.add_rounded, size: 19),
+                    label: const Text('添加和弦'),
+                  ),
+                  SegmentedButton<_FreePlaybackMode>(
+                    segments: const [
+                      ButtonSegment<_FreePlaybackMode>(
+                        value: _FreePlaybackMode.sequential,
+                        icon: Icon(Icons.playlist_play_rounded, size: 18),
+                        label: Text('顺序播放'),
+                      ),
+                      ButtonSegment<_FreePlaybackMode>(
+                        value: _FreePlaybackMode.random,
+                        icon: Icon(Icons.shuffle_rounded, size: 17),
+                        label: Text('随机播放'),
+                      ),
+                    ],
+                    selected: <_FreePlaybackMode>{playbackMode},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (selection) =>
+                        onPlaybackModeChanged(selection.single),
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (interactionHint != null)
+          if (!isSequencePlaying && interactionHint != null)
             Container(
               color: ChordleColors.selected.withValues(alpha: 0.14),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1005,19 +1515,23 @@ class _FreeChordList extends StatelessWidget {
                 ),
               ),
             ),
-          const Divider(height: 1),
+          if (!isSequencePlaying) const Divider(height: 1),
           Expanded(
             child: ListView.separated(
               controller: scrollController,
               padding: const EdgeInsets.all(10),
               itemCount: groups.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              separatorBuilder: (_, _) =>
+                  SizedBox(height: isSequencePlaying ? 7 : 10),
               itemBuilder: (context, index) {
                 final group = groups[index];
                 return _FreeChordGroupCard(
+                  key: groupCardKey(group.id),
                   group: group,
                   groupNumber: index + 1,
                   edo: edo,
+                  jiMode: jiMode,
+                  compact: isSequencePlaying,
                   active: group.id == activeGroupId,
                   playing: group.id == playingGroupId,
                   groupSwapSelected: group.id == groupSwapSourceId,
@@ -1029,8 +1543,9 @@ class _FreeChordList extends StatelessWidget {
                   onSort: () => onSortGroup(group.id),
                   onSwapGroup: () => onSwapGroup(group.id),
                   onDelete: () => onDeleteGroup(group.id),
-                  onNoteTap: (step) => onNoteTap(group.id, step),
-                  onNoteLongPress: (step) => onNoteLongPress(group.id, step),
+                  onNoteTap: (toneId) => onNoteTap(group.id, toneId),
+                  onNoteLongPress: (toneId) =>
+                      onNoteLongPress(group.id, toneId),
                 );
               },
             ),
@@ -1046,6 +1561,8 @@ class _FreeChordGroupCard extends StatelessWidget {
     required this.group,
     required this.groupNumber,
     required this.edo,
+    required this.jiMode,
+    required this.compact,
     required this.active,
     required this.playing,
     required this.groupSwapSelected,
@@ -1059,11 +1576,14 @@ class _FreeChordGroupCard extends StatelessWidget {
     required this.onDelete,
     required this.onNoteTap,
     required this.onNoteLongPress,
+    super.key,
   });
 
   final FreeChordGroup group;
   final int groupNumber;
   final int edo;
+  final bool jiMode;
+  final bool compact;
   final bool active;
   final bool playing;
   final bool groupSwapSelected;
@@ -1097,7 +1617,7 @@ class _FreeChordGroupCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(9),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: EdgeInsets.all(compact ? 7 : 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1122,28 +1642,33 @@ class _FreeChordGroupCard extends StatelessWidget {
                       size: 20,
                     ),
                   ),
-                IconButton(
-                  onPressed: audioReady && !group.isEmpty ? onPlay : null,
-                  tooltip: '播放和弦 $groupNumber',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.play_arrow_rounded),
-                ),
-                IconButton(
-                  onPressed: canDeleteGroup ? onDelete : null,
-                  tooltip: '删除和弦组',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.delete_outline_rounded, size: 21),
-                ),
+                if (!compact) ...[
+                  IconButton(
+                    onPressed: audioReady && !group.isEmpty ? onPlay : null,
+                    tooltip: '播放和弦 $groupNumber',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.play_arrow_rounded),
+                  ),
+                  IconButton(
+                    onPressed: canDeleteGroup ? onDelete : null,
+                    tooltip: '删除和弦组',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 21),
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 7),
+            SizedBox(height: compact ? 4 : 7),
             if (group.isEmpty)
               InkWell(
-                onTap: onSelect,
+                onTap: compact ? null : onSelect,
                 borderRadius: BorderRadius.circular(7),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 17, horizontal: 8),
-                  child: Text(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    vertical: compact ? 8 : 17,
+                    horizontal: 8,
+                  ),
+                  child: const Text(
                     '从下方标尺选音并加入和弦',
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -1160,42 +1685,51 @@ class _FreeChordGroupCard extends StatelessWidget {
                 children: [
                   for (final tone in group.tones)
                     _FreeChordTile(
-                      label: extraStepLabel(tone.step, edo),
+                      label: jiMode
+                          ? frequencyLabel(tone.frequencyHz)
+                          : tone.step < 0
+                          ? '待随机'
+                          : extraStepLabel(tone.step, edo),
                       ratioLabel: group.isRoot(tone)
-                          ? '${tone.ratioLabel ?? '1/1'} · 根音'
-                          : tone.ratioLabel ?? '刻度尺',
+                          ? '1/1 · 根音'
+                          : tone.ratioLabel ?? (jiMode ? '' : '刻度尺'),
+                      compact: compact,
                       isRoot: group.isRoot(tone),
                       swapSource:
                           noteSwapSource?.groupId == group.id &&
-                          noteSwapSource?.step == tone.step,
-                      onTap: () => onNoteTap(tone.step),
-                      onLongPress: () => onNoteLongPress(tone.step),
+                          noteSwapSource?.toneId == tone.id,
+                      onTap: compact ? null : () => onNoteTap(tone.id),
+                      onLongPress: compact
+                          ? null
+                          : () => onNoteLongPress(tone.id),
                     ),
                 ],
               ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                TextButton.icon(
-                  onPressed: active ? null : onSelect,
-                  icon: const Icon(Icons.edit_rounded, size: 17),
-                  label: Text(active ? '正在编辑' : '编辑此组'),
-                ),
-                TextButton.icon(
-                  onPressed: group.length >= 2 ? onSort : null,
-                  icon: const Icon(Icons.sort_rounded, size: 18),
-                  label: const Text('从低到高'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: canDeleteGroup ? onSwapGroup : null,
-                  icon: const Icon(Icons.swap_vert_rounded, size: 18),
-                  label: Text(groupSwapSelected ? '选择目标组' : '交换整组'),
-                ),
-              ],
-            ),
+            if (!compact) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: active ? null : onSelect,
+                    icon: const Icon(Icons.edit_rounded, size: 17),
+                    label: Text(active ? '正在编辑' : '编辑此组'),
+                  ),
+                  TextButton.icon(
+                    onPressed: group.length >= 2 ? onSort : null,
+                    icon: const Icon(Icons.sort_rounded, size: 18),
+                    label: const Text('从低到高'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: canDeleteGroup ? onSwapGroup : null,
+                    icon: const Icon(Icons.swap_vert_rounded, size: 18),
+                    label: Text(groupSwapSelected ? '选择目标组' : '交换整组'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1207,6 +1741,7 @@ class _FreeChordTile extends StatelessWidget {
   const _FreeChordTile({
     required this.label,
     required this.ratioLabel,
+    required this.compact,
     required this.isRoot,
     required this.swapSource,
     required this.onTap,
@@ -1215,16 +1750,17 @@ class _FreeChordTile extends StatelessWidget {
 
   final String label;
   final String ratioLabel;
+  final bool compact;
   final bool isRoot;
   final bool swapSource;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 106,
-      height: 66,
+      width: compact ? 100 : 106,
+      height: compact ? 56 : 66,
       child: Material(
         color: swapSource
             ? ChordleColors.selected.withValues(alpha: 0.24)
@@ -1259,7 +1795,6 @@ class _FreeChordTile extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: ChordleColors.text,
-                          fontSize: 15,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -1416,18 +1951,23 @@ class _FreeInputSwitcherState extends State<_FreeInputSwitcher> {
 
 enum _FreeInputMode { ruler, ratio }
 
+enum _FreePlaybackMode { sequential, random }
+
 enum _NoteAction { delete, swap, setRoot, clearRoot }
 
 final class _NoteSwapSelection {
-  const _NoteSwapSelection(this.groupId, this.step);
+  const _NoteSwapSelection(this.groupId, this.toneId);
 
   final int groupId;
-  final int step;
+  final int toneId;
 }
 
 final class _PlaybackChord {
-  const _PlaybackChord(this.groupId, this.steps);
+  const _PlaybackChord.edo(this.groupId, this.steps) : frequencies = null;
+
+  const _PlaybackChord.ji(this.groupId, this.frequencies) : steps = null;
 
   final int groupId;
-  final List<int> steps;
+  final List<int>? steps;
+  final List<double>? frequencies;
 }

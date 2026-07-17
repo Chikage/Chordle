@@ -100,6 +100,7 @@ Future<ChordleSettings?> showExtraSettingsDialog(
   );
   var toneCount = sanitizeChordToneCount(settings.extraToneCount);
   var edo = sanitizeExtraEdo(settings.extraEdo);
+  var jiMode = settings.freeJiEnabled;
   var program = sanitizeMidiProgramNumber(settings.instrumentProgram);
   var preview = settings.keyPitchPreviewEnabled;
 
@@ -110,15 +111,21 @@ Future<ChordleSettings?> showExtraSettingsDialog(
         title: freeMode ? 'Free 设置' : 'Extra 设置',
         onSave: () => Navigator.of(dialogContext).pop(
           settings.copyWith(
-            extraLow: range.lowerBound,
-            extraHigh: range.upperBound,
-            extraToneCount: toneCount,
+            extraLow: freeMode ? null : range.lowerBound,
+            extraHigh: freeMode ? null : range.upperBound,
+            extraToneCount: freeMode ? null : toneCount,
             extraEdo: edo,
+            freeJiEnabled: jiMode,
             instrumentProgram: program,
-            keyPitchPreviewEnabled: preview,
+            keyPitchPreviewEnabled: freeMode ? null : preview,
           ),
         ),
         children: [
+          if (freeMode)
+            _FreeJiSwitch(
+              value: jiMode,
+              onChanged: (value) => setState(() => jiMode = value),
+            ),
           Text('$edo EDO', style: const TextStyle(fontWeight: FontWeight.w800)),
           Row(
             children: [
@@ -147,12 +154,14 @@ Future<ChordleSettings?> showExtraSettingsDialog(
               ),
             ],
           ),
-          Text(
-            '${freeMode ? '可选' : '出题'}音域：${rangeLabel(range)} · '
-            '${extraRangeLabel(edo, range)}',
-          ),
+          if (!freeMode)
+            Text('出题音域：${rangeLabel(range)} · ${extraRangeLabel(edo, range)}'),
           freeMode
-              ? const _HintText('Free 暂使用 Extra 的 1–72 EDO 标尺；音域两端只允许选择 C。')
+              ? _HintText(
+                  jiMode
+                      ? 'Free 使用完整 A0–C8 标尺并始终预听；JI 分数按精确频率比计算，无参考组会循环随机隐含根音。'
+                      : 'Free 使用完整 A0–C8 标尺并始终预听；仅比例组会循环随机隐含 EDO 根音。',
+                )
               : const _HintText(
                   'Extra 会按当前 EDO 把八度等分；音域两端只允许选择 C，并使用 1–72 EDO 标尺模板绘制键盘刻度。',
                 ),
@@ -171,48 +180,51 @@ Future<ChordleSettings?> showExtraSettingsDialog(
             value: program,
             onChanged: (value) => setState(() => program = value),
           ),
-          _PreviewSwitch(
-            value: preview,
-            onChanged: (value) => setState(() => preview = value),
-          ),
-          Text(
-            '音域两端：${noteLabel(range.lowerBound)} / ${noteLabel(range.upperBound)}',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          RangeSlider(
-            values: RangeValues(
-              octaveForCMidiNote(range.lowerBound).toDouble(),
-              octaveForCMidiNote(range.upperBound).toDouble(),
+          if (!freeMode) ...[
+            _PreviewSwitch(
+              value: preview,
+              onChanged: (value) => setState(() => preview = value),
             ),
-            min: minExtraRangeOctave.toDouble(),
-            max: maxExtraRangeOctave.toDouble(),
-            divisions: maxExtraRangeOctave - minExtraRangeOctave,
-            onChanged: (values) => setState(() {
-              range = sanitizeExtraPlayableRange(
-                IntRange.sorted(
-                  cMidiNoteForOctave(values.start.round()),
-                  cMidiNoteForOctave(values.end.round()),
+            Text(
+              '音域两端：${noteLabel(range.lowerBound)} / ${noteLabel(range.upperBound)}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            RangeSlider(
+              values: RangeValues(
+                octaveForCMidiNote(range.lowerBound).toDouble(),
+                octaveForCMidiNote(range.upperBound).toDouble(),
+              ),
+              min: minExtraRangeOctave.toDouble(),
+              max: maxExtraRangeOctave.toDouble(),
+              divisions: maxExtraRangeOctave - minExtraRangeOctave,
+              onChanged: (values) => setState(() {
+                range = sanitizeExtraPlayableRange(
+                  IntRange.sorted(
+                    cMidiNoteForOctave(values.start.round()),
+                    cMidiNoteForOctave(values.end.round()),
+                  ),
+                );
+              }),
+            ),
+            _PresetButtons(
+              leftLabel: '默认',
+              rightLabel: '全 C 范围',
+              onLeft: () => setState(() {
+                range = defaultExtraPlayableRange;
+                toneCount = defaultChordToneCount;
+                edo = defaultExtraEdo;
+                jiMode = false;
+                program = defaultMidiProgramNumber;
+                preview = false;
+              }),
+              onRight: () => setState(
+                () => range = const IntRange(
+                  lowestExtraPlayableMidiNote,
+                  highestExtraPlayableMidiNote,
                 ),
-              );
-            }),
-          ),
-          _PresetButtons(
-            leftLabel: '默认',
-            rightLabel: '全 C 范围',
-            onLeft: () => setState(() {
-              range = defaultExtraPlayableRange;
-              if (!freeMode) toneCount = defaultChordToneCount;
-              edo = defaultExtraEdo;
-              program = defaultMidiProgramNumber;
-              preview = false;
-            }),
-            onRight: () => setState(
-              () => range = const IntRange(
-                lowestExtraPlayableMidiNote,
-                highestExtraPlayableMidiNote,
               ),
             ),
-          ),
+          ],
         ],
       ),
     ),
@@ -430,6 +442,35 @@ class _ProgramSlider extends StatelessWidget {
       max: maxMidiProgramNumber.toDouble(),
       divisions: maxMidiProgramNumber - minMidiProgramNumber,
       onChanged: (next) => onChanged(sanitizeMidiProgramNumber(next.round())),
+    );
+  }
+}
+
+class _FreeJiSwitch extends StatelessWidget {
+  const _FreeJiSwitch({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('JI 精确比例模式', style: TextStyle(fontWeight: FontWeight.w800)),
+              SizedBox(height: 2),
+              Text(
+                '分数按精确频率比播放，不量化到 EDO Step',
+                style: TextStyle(fontSize: 12.5),
+              ),
+            ],
+          ),
+        ),
+        Switch(value: value, onChanged: onChanged),
+      ],
     );
   }
 }

@@ -423,6 +423,11 @@ class MainActivity : FlutterActivity() {
             ),
             SettingSpec("extraEdo", listOf("extra_edo"), defaultValue = 24),
             SettingSpec(
+                "freeJiEnabled",
+                listOf("free_ji_enabled"),
+                defaultValue = false,
+            ),
+            SettingSpec(
                 "overtoneLow",
                 listOf("overtoneRangeLow", "overtone_range_low"),
                 defaultValue = 8,

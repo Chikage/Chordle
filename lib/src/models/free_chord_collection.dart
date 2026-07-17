@@ -1,9 +1,17 @@
 final class FreeChordTone {
-  FreeChordTone._(this.id, this.step, {this.ratioLabel});
+  FreeChordTone._(
+    this.id,
+    this.step, {
+    this.ratioLabel,
+    this.frequencyHz,
+    this.isAbsoluteAnchor = false,
+  });
 
   final int id;
   int step;
   String? ratioLabel;
+  double? frequencyHz;
+  bool isAbsoluteAnchor;
 }
 
 final class FreeChordGroup {
@@ -16,9 +24,17 @@ final class FreeChordGroup {
   List<FreeChordTone> get tones => List<FreeChordTone>.unmodifiable(_tones);
   List<int> get steps =>
       List<int>.unmodifiable(_tones.map((tone) => tone.step));
-  FreeChordTone? get rootTone => _toneById(_rootToneId);
+  FreeChordTone? get rootTone => toneById(_rootToneId);
   bool get isEmpty => _tones.isEmpty;
   int get length => _tones.length;
+
+  FreeChordTone? toneById(int? toneId) {
+    if (toneId == null) return null;
+    for (final tone in _tones) {
+      if (tone.id == toneId) return tone;
+    }
+    return null;
+  }
 
   FreeChordTone? toneAtStep(int step) {
     for (final tone in _tones) {
@@ -27,15 +43,27 @@ final class FreeChordGroup {
     return null;
   }
 
-  bool isRoot(FreeChordTone tone) => tone.id == _rootToneId;
-
-  FreeChordTone? _toneById(int? toneId) {
-    if (toneId == null) return null;
+  FreeChordTone? get lowestAbsoluteAnchor {
+    FreeChordTone? lowest;
     for (final tone in _tones) {
-      if (tone.id == toneId) return tone;
+      if (!tone.isAbsoluteAnchor || tone.frequencyHz == null) continue;
+      if (lowest == null || tone.frequencyHz! < lowest.frequencyHz!) {
+        lowest = tone;
+      }
     }
-    return null;
+    return lowest;
   }
+
+  FreeChordTone? get lowestStepAnchor {
+    FreeChordTone? lowest;
+    for (final tone in _tones) {
+      if (!tone.isAbsoluteAnchor && tone.ratioLabel != null) continue;
+      if (lowest == null || tone.step < lowest.step) lowest = tone;
+    }
+    return lowest;
+  }
+
+  bool isRoot(FreeChordTone tone) => tone.id == _rootToneId;
 
   void _clearDerivedRatioLabels() {
     for (final tone in _tones) {
@@ -105,11 +133,58 @@ final class FreeChordCollection {
     return true;
   }
 
-  bool addStep(int groupId, int step, {String? ratioLabel}) {
+  bool addStep(
+    int groupId,
+    int step, {
+    String? ratioLabel,
+    double? frequencyHz,
+    bool isAbsoluteAnchor = false,
+  }) {
     final group = groupById(groupId);
     if (group == null || group.toneAtStep(step) != null) return false;
     group._tones.add(
-      FreeChordTone._(_nextToneId++, step, ratioLabel: ratioLabel),
+      FreeChordTone._(
+        _nextToneId++,
+        step,
+        ratioLabel: ratioLabel,
+        frequencyHz: frequencyHz,
+        isAbsoluteAnchor: isAbsoluteAnchor,
+      ),
+    );
+    return true;
+  }
+
+  bool addJiRatioTone(
+    int groupId, {
+    required String ratioLabel,
+    required int? approximateStep,
+    required double? frequencyHz,
+  }) => addRatioTone(
+    groupId,
+    ratioLabel: ratioLabel,
+    resolvedStep: approximateStep,
+    frequencyHz: frequencyHz,
+  );
+
+  bool addRatioTone(
+    int groupId, {
+    required String ratioLabel,
+    required int? resolvedStep,
+    double? frequencyHz,
+  }) {
+    final group = groupById(groupId);
+    if (group == null ||
+        group._tones.any((tone) => tone.ratioLabel == ratioLabel)) {
+      return false;
+    }
+    final toneId = _nextToneId++;
+    group._tones.add(
+      FreeChordTone._(
+        toneId,
+        resolvedStep ?? -toneId,
+        ratioLabel: ratioLabel,
+        frequencyHz: frequencyHz,
+      ),
     );
     return true;
   }
@@ -122,27 +197,40 @@ final class FreeChordCollection {
     return true;
   }
 
-  bool setRoot(int groupId, int step) {
+  bool setRoot(int groupId, int step, {bool clearRatioLabels = true}) {
     final group = groupById(groupId);
     final tone = group?.toneAtStep(step);
     if (group == null || tone == null) return false;
     group._rootToneId = tone.id;
-    group._clearDerivedRatioLabels();
+    if (clearRatioLabels) {
+      group._clearDerivedRatioLabels();
+    } else {
+      tone.ratioLabel = null;
+    }
     return true;
   }
 
-  bool clearRoot(int groupId) {
+  bool setJiRoot(int groupId, int toneId) {
+    final group = groupById(groupId);
+    final tone = group?.toneById(toneId);
+    if (group == null || tone == null || tone.frequencyHz == null) return false;
+    group._rootToneId = tone.id;
+    tone.ratioLabel = null;
+    return true;
+  }
+
+  bool clearRoot(int groupId, {bool clearRatioLabels = true}) {
     final group = groupById(groupId);
     if (group == null || group._rootToneId == null) return false;
     group._rootToneId = null;
-    group._clearDerivedRatioLabels();
+    if (clearRatioLabels) group._clearDerivedRatioLabels();
     return true;
   }
 
   bool deleteLastStep(int groupId) {
     final group = groupById(groupId);
     if (group == null || group._tones.isEmpty) return false;
-    _removeTone(group, group._tones.last);
+    _removeTone(group, group._tones.last, clearRatiosWhenRemovingRoot: true);
     return true;
   }
 
@@ -150,7 +238,23 @@ final class FreeChordCollection {
     final group = groupById(groupId);
     final tone = group?.toneAtStep(step);
     if (group == null || tone == null) return false;
-    _removeTone(group, tone);
+    _removeTone(group, tone, clearRatiosWhenRemovingRoot: true);
+    return true;
+  }
+
+  bool removeToneById(
+    int groupId,
+    int toneId, {
+    bool clearRatiosWhenRemovingRoot = true,
+  }) {
+    final group = groupById(groupId);
+    final tone = group?.toneById(toneId);
+    if (group == null || tone == null) return false;
+    _removeTone(
+      group,
+      tone,
+      clearRatiosWhenRemovingRoot: clearRatiosWhenRemovingRoot,
+    );
     return true;
   }
 
@@ -171,6 +275,20 @@ final class FreeChordCollection {
       if (before[index] != group._tones[index].step) return true;
     }
     return false;
+  }
+
+  bool sortJiGroup(int groupId) {
+    final group = groupById(groupId);
+    if (group == null || group._tones.length < 2) return false;
+    final before = group._tones.map((tone) => tone.id).toList();
+    group._tones.sort((first, second) {
+      final firstFrequency = first.frequencyHz ?? double.infinity;
+      final secondFrequency = second.frequencyHz ?? double.infinity;
+      final frequencyOrder = firstFrequency.compareTo(secondFrequency);
+      if (frequencyOrder != 0) return frequencyOrder;
+      return first.id.compareTo(second.id);
+    });
+    return !_sameOrder(before, group._tones.map((tone) => tone.id));
   }
 
   bool swapGroups(int firstGroupId, int secondGroupId) {
@@ -195,92 +313,162 @@ final class FreeChordCollection {
   }) {
     final firstGroup = groupById(firstGroupId);
     final secondGroup = groupById(secondGroupId);
-    if (firstGroup == null || secondGroup == null) {
+    final firstTone = firstGroup?.toneAtStep(firstStep);
+    final secondTone = secondGroup?.toneAtStep(secondStep);
+    if (firstGroup == null ||
+        secondGroup == null ||
+        firstTone == null ||
+        secondTone == null) {
       return FreeNoteSwapResult.missingGroupOrNote;
     }
     if (firstGroupId == secondGroupId) return FreeNoteSwapResult.sameGroup;
     if (firstStep == secondStep) return FreeNoteSwapResult.sameNote;
 
-    final firstTone = firstGroup.toneAtStep(firstStep);
-    final secondTone = secondGroup.toneAtStep(secondStep);
-    if (firstTone == null || secondTone == null) {
+    final firstSnapshot = _GroupSnapshot(firstGroup);
+    final secondSnapshot = _GroupSnapshot(secondGroup);
+    final firstWasRoot = firstGroup.isRoot(firstTone);
+    final secondWasRoot = secondGroup.isRoot(secondTone);
+    final firstContent = _ToneContent(firstTone);
+    final secondContent = _ToneContent(secondTone);
+    firstContent.applyTo(secondTone);
+    secondContent.applyTo(firstTone);
+    if (firstWasRoot) firstGroup._rootToneId = null;
+    if (secondWasRoot) secondGroup._rootToneId = null;
+
+    FreeNoteSwapResult validateRawGroup(FreeChordGroup group) {
+      final resolved = group._tones.where((tone) => tone.step >= 0).toList();
+      if (isPlayable != null &&
+          resolved.any((tone) => !isPlayable(tone.step))) {
+        return FreeNoteSwapResult.outOfRange;
+      }
+      for (var first = 0; first < resolved.length; first += 1) {
+        for (var second = first + 1; second < resolved.length; second += 1) {
+          if (resolved[first].step == resolved[second].step) {
+            return FreeNoteSwapResult.wouldDuplicate;
+          }
+        }
+      }
+      return FreeNoteSwapResult.swapped;
+    }
+
+    final firstResult = stepsForRatio == null
+        ? validateRawGroup(firstGroup)
+        : _applyEdoReference(
+            firstGroup,
+            stepsForRatio: stepsForRatio,
+            isPlayable: isPlayable ?? (_) => true,
+          );
+    final secondResult = stepsForRatio == null
+        ? validateRawGroup(secondGroup)
+        : _applyEdoReference(
+            secondGroup,
+            stepsForRatio: stepsForRatio,
+            isPlayable: isPlayable ?? (_) => true,
+          );
+    final result = firstResult != FreeNoteSwapResult.swapped
+        ? firstResult
+        : secondResult;
+    if (result != FreeNoteSwapResult.swapped) {
+      firstSnapshot.restore(firstGroup);
+      secondSnapshot.restore(secondGroup);
+    }
+    return result;
+  }
+
+  FreeNoteSwapResult swapJiTones({
+    required int firstGroupId,
+    required int firstToneId,
+    required int secondGroupId,
+    required int secondToneId,
+    required double Function(String ratioLabel) ratioValue,
+    required int Function(double frequencyHz) approximateStep,
+    required bool Function(double frequencyHz) isPlayable,
+  }) {
+    final firstGroup = groupById(firstGroupId);
+    final secondGroup = groupById(secondGroupId);
+    final firstTone = firstGroup?.toneById(firstToneId);
+    final secondTone = secondGroup?.toneById(secondToneId);
+    if (firstGroup == null ||
+        secondGroup == null ||
+        firstTone == null ||
+        secondTone == null) {
       return FreeNoteSwapResult.missingGroupOrNote;
     }
-    final firstRatio = firstTone.ratioLabel;
-    final secondRatio = secondTone.ratioLabel;
-    final firstRootRemoved = firstGroup.isRoot(firstTone);
-    final secondRootRemoved = secondGroup.isRoot(secondTone);
+    if (firstGroupId == secondGroupId) return FreeNoteSwapResult.sameGroup;
+    if (firstToneId == secondToneId) return FreeNoteSwapResult.sameNote;
 
-    int destinationReference(
-      FreeChordGroup group,
-      FreeChordTone incomingSlot,
-      int provisionalIncomingStep,
-      bool rootRemoved,
-    ) {
-      final root = rootRemoved ? null : group.rootTone;
-      if (root != null && root.id != incomingSlot.id) return root.step;
+    final firstSnapshot = _GroupSnapshot(firstGroup);
+    final secondSnapshot = _GroupSnapshot(secondGroup);
+    final firstWasRoot = firstGroup.isRoot(firstTone);
+    final secondWasRoot = secondGroup.isRoot(secondTone);
 
-      int? lowest;
-      for (final tone in group._tones) {
-        if (tone.id == incomingSlot.id) continue;
-        if (lowest == null || tone.step < lowest) lowest = tone.step;
-      }
-      return lowest ?? provisionalIncomingStep;
-    }
+    final firstContent = _ToneContent(firstTone);
+    final secondContent = _ToneContent(secondTone);
+    firstContent.applyTo(secondTone);
+    secondContent.applyTo(firstTone);
+    if (firstWasRoot) firstGroup._rootToneId = null;
+    if (secondWasRoot) secondGroup._rootToneId = null;
 
-    int recalculatedStep(
-      String? ratioLabel,
-      int provisionalStep,
-      int referenceStep,
-    ) {
-      if (ratioLabel == null || stepsForRatio == null) return provisionalStep;
-      return referenceStep + stepsForRatio(ratioLabel);
-    }
-
-    final nextFirstStep = recalculatedStep(
-      secondRatio,
-      secondStep,
-      destinationReference(firstGroup, firstTone, secondStep, firstRootRemoved),
+    final firstResult = _applyJiReference(
+      firstGroup,
+      ratioValue: ratioValue,
+      approximateStep: approximateStep,
+      isPlayable: isPlayable,
     );
-    final nextSecondStep = recalculatedStep(
-      firstRatio,
-      firstStep,
-      destinationReference(
-        secondGroup,
-        secondTone,
-        firstStep,
-        secondRootRemoved,
-      ),
+    final secondResult = _applyJiReference(
+      secondGroup,
+      ratioValue: ratioValue,
+      approximateStep: approximateStep,
+      isPlayable: isPlayable,
     );
+    final result = firstResult != FreeNoteSwapResult.swapped
+        ? firstResult
+        : secondResult;
+    if (result != FreeNoteSwapResult.swapped) {
+      firstSnapshot.restore(firstGroup);
+      secondSnapshot.restore(secondGroup);
+    }
+    return result;
+  }
 
-    if ((isPlayable != null && !isPlayable(nextFirstStep)) ||
-        (isPlayable != null && !isPlayable(nextSecondStep))) {
-      return FreeNoteSwapResult.outOfRange;
-    }
-    if (firstGroup._tones.any(
-          (tone) => tone.id != firstTone.id && tone.step == nextFirstStep,
-        ) ||
-        secondGroup._tones.any(
-          (tone) => tone.id != secondTone.id && tone.step == nextSecondStep,
-        )) {
-      return FreeNoteSwapResult.wouldDuplicate;
-    }
+  FreeNoteSwapResult recalculateJiGroup({
+    required int groupId,
+    required double Function(String ratioLabel) ratioValue,
+    required int Function(double frequencyHz) approximateStep,
+    required bool Function(double frequencyHz) isPlayable,
+    double? fallbackReferenceHz,
+  }) {
+    final group = groupById(groupId);
+    if (group == null) return FreeNoteSwapResult.missingGroupOrNote;
+    final snapshot = _GroupSnapshot(group);
+    final result = _applyJiReference(
+      group,
+      ratioValue: ratioValue,
+      approximateStep: approximateStep,
+      isPlayable: isPlayable,
+      fallbackReferenceHz: fallbackReferenceHz,
+    );
+    if (result != FreeNoteSwapResult.swapped) snapshot.restore(group);
+    return result;
+  }
 
-    if (firstRootRemoved) {
-      firstGroup._rootToneId = null;
-      firstGroup._clearDerivedRatioLabels();
-    }
-    if (secondRootRemoved) {
-      secondGroup._rootToneId = null;
-      secondGroup._clearDerivedRatioLabels();
-    }
-    firstTone
-      ..step = nextFirstStep
-      ..ratioLabel = secondRatio;
-    secondTone
-      ..step = nextSecondStep
-      ..ratioLabel = firstRatio;
-    return FreeNoteSwapResult.swapped;
+  FreeNoteSwapResult recalculateEdoGroup({
+    required int groupId,
+    required int Function(String ratioLabel) stepsForRatio,
+    required bool Function(int step) isPlayable,
+    int? fallbackReferenceStep,
+  }) {
+    final group = groupById(groupId);
+    if (group == null) return FreeNoteSwapResult.missingGroupOrNote;
+    final snapshot = _GroupSnapshot(group);
+    final result = _applyEdoReference(
+      group,
+      stepsForRatio: stepsForRatio,
+      isPlayable: isPlayable,
+      fallbackReferenceStep: fallbackReferenceStep,
+    );
+    if (result != FreeNoteSwapResult.swapped) snapshot.restore(group);
+    return result;
   }
 
   int clearAllSteps() {
@@ -308,14 +496,150 @@ final class FreeChordCollection {
     return removed;
   }
 
-  void _removeTone(FreeChordGroup group, FreeChordTone tone) {
+  FreeNoteSwapResult _applyJiReference(
+    FreeChordGroup group, {
+    required double Function(String ratioLabel) ratioValue,
+    required int Function(double frequencyHz) approximateStep,
+    required bool Function(double frequencyHz) isPlayable,
+    double? fallbackReferenceHz,
+  }) {
+    final referenceHz =
+        group.rootTone?.frequencyHz ??
+        group.lowestAbsoluteAnchor?.frequencyHz ??
+        fallbackReferenceHz;
+    for (final tone in group._tones) {
+      final label = tone.ratioLabel;
+      if (label == null) continue;
+      if (referenceHz == null) {
+        tone
+          ..frequencyHz = null
+          ..step = -tone.id;
+        continue;
+      }
+      final frequency = referenceHz * ratioValue(label);
+      if (!isPlayable(frequency)) return FreeNoteSwapResult.outOfRange;
+      tone
+        ..frequencyHz = frequency
+        ..step = approximateStep(frequency)
+        ..isAbsoluteAnchor = false;
+    }
+
+    final resolved = group._tones
+        .where((tone) => tone.frequencyHz != null)
+        .toList(growable: false);
+    for (var first = 0; first < resolved.length; first += 1) {
+      for (var second = first + 1; second < resolved.length; second += 1) {
+        final firstHz = resolved[first].frequencyHz!;
+        final secondHz = resolved[second].frequencyHz!;
+        if ((firstHz - secondHz).abs() <= 0.000001) {
+          return FreeNoteSwapResult.wouldDuplicate;
+        }
+      }
+    }
+    return FreeNoteSwapResult.swapped;
+  }
+
+  FreeNoteSwapResult _applyEdoReference(
+    FreeChordGroup group, {
+    required int Function(String ratioLabel) stepsForRatio,
+    required bool Function(int step) isPlayable,
+    int? fallbackReferenceStep,
+  }) {
+    final referenceStep =
+        group.rootTone?.step ??
+        group.lowestStepAnchor?.step ??
+        fallbackReferenceStep;
+    for (final tone in group._tones) {
+      final label = tone.ratioLabel;
+      if (label == null) continue;
+      if (referenceStep == null) {
+        tone
+          ..step = -tone.id
+          ..frequencyHz = null
+          ..isAbsoluteAnchor = false;
+        continue;
+      }
+      final step = referenceStep + stepsForRatio(label);
+      if (!isPlayable(step)) return FreeNoteSwapResult.outOfRange;
+      tone
+        ..step = step
+        ..frequencyHz = null
+        ..isAbsoluteAnchor = false;
+    }
+
+    final resolved = group._tones
+        .where((tone) => isPlayable(tone.step))
+        .toList(growable: false);
+    for (var first = 0; first < resolved.length; first += 1) {
+      for (var second = first + 1; second < resolved.length; second += 1) {
+        if (resolved[first].step == resolved[second].step) {
+          return FreeNoteSwapResult.wouldDuplicate;
+        }
+      }
+    }
+    return FreeNoteSwapResult.swapped;
+  }
+
+  void _removeTone(
+    FreeChordGroup group,
+    FreeChordTone tone, {
+    required bool clearRatiosWhenRemovingRoot,
+  }) {
     final removedRoot = group.isRoot(tone);
     group._tones.remove(tone);
     if (removedRoot) {
       group._rootToneId = null;
-      group._clearDerivedRatioLabels();
+      if (clearRatiosWhenRemovingRoot) group._clearDerivedRatioLabels();
     }
   }
 
   FreeChordGroup _newGroup() => FreeChordGroup._(_nextGroupId++);
+}
+
+final class _ToneContent {
+  _ToneContent(FreeChordTone tone)
+    : step = tone.step,
+      ratioLabel = tone.ratioLabel,
+      frequencyHz = tone.frequencyHz,
+      isAbsoluteAnchor = tone.isAbsoluteAnchor;
+
+  final int step;
+  final String? ratioLabel;
+  final double? frequencyHz;
+  final bool isAbsoluteAnchor;
+
+  void applyTo(FreeChordTone tone) {
+    tone
+      ..step = step
+      ..ratioLabel = ratioLabel
+      ..frequencyHz = frequencyHz
+      ..isAbsoluteAnchor = isAbsoluteAnchor;
+  }
+}
+
+final class _GroupSnapshot {
+  _GroupSnapshot(FreeChordGroup group)
+    : rootToneId = group._rootToneId,
+      contents = <int, _ToneContent>{
+        for (final tone in group._tones) tone.id: _ToneContent(tone),
+      };
+
+  final int? rootToneId;
+  final Map<int, _ToneContent> contents;
+
+  void restore(FreeChordGroup group) {
+    group._rootToneId = rootToneId;
+    for (final tone in group._tones) {
+      contents[tone.id]?.applyTo(tone);
+    }
+  }
+}
+
+bool _sameOrder(List<int> first, Iterable<int> second) {
+  final other = second.toList(growable: false);
+  if (first.length != other.length) return false;
+  for (var index = 0; index < first.length; index += 1) {
+    if (first[index] != other[index]) return false;
+  }
+  return true;
 }

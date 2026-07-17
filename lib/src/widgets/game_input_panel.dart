@@ -18,6 +18,7 @@ class GameInputPanel extends StatelessWidget {
     this.answerText,
     this.compact = false,
     this.playText = '播放和弦',
+    this.playIcon = Icons.play_arrow_rounded,
     this.deleteText = '删除',
     this.submitText = '提交',
     super.key,
@@ -37,6 +38,7 @@ class GameInputPanel extends StatelessWidget {
   final String? answerText;
   final bool compact;
   final String playText;
+  final IconData playIcon;
   final String deleteText;
   final String submitText;
 
@@ -57,7 +59,7 @@ class GameInputPanel extends StatelessWidget {
                     height: 43,
                     child: FilledButton.icon(
                       onPressed: audioReady ? onPlayTarget : null,
-                      icon: const Icon(Icons.play_arrow_rounded, size: 21),
+                      icon: Icon(playIcon, size: 21),
                       label: Text(
                         playText,
                         maxLines: 1,

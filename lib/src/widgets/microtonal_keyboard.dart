@@ -13,6 +13,7 @@ class MicrotonalKeyboard extends StatefulWidget {
     required this.selectedStep,
     required this.valueColors,
     required this.onStepPressed,
+    this.initialCenterMidi,
     this.compact = false,
     super.key,
   });
@@ -23,6 +24,7 @@ class MicrotonalKeyboard extends StatefulWidget {
   final int? selectedStep;
   final Map<int, Color> valueColors;
   final ValueChanged<int> onStepPressed;
+  final double? initialCenterMidi;
   final bool compact;
 
   @override
@@ -35,15 +37,19 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
   double _startScale = 1;
   double _startOffset = 0;
   double _viewportWidth = 0;
+  bool _offsetInitialized = false;
 
   @override
   void didUpdateWidget(MicrotonalKeyboard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.edo != widget.edo ||
         oldWidget.lowMidi != widget.lowMidi ||
-        oldWidget.highMidi != widget.highMidi) {
+        oldWidget.highMidi != widget.highMidi ||
+        oldWidget.initialCenterMidi != widget.initialCenterMidi ||
+        oldWidget.compact != widget.compact) {
       _scale = 1;
       _offsetX = 0;
+      _offsetInitialized = false;
     }
   }
 
@@ -68,6 +74,18 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
           final count = rulerLast - rulerFirst + 1;
           final contentWidth = count * stepWidth;
           final minOffset = math.min(0.0, constraints.maxWidth - contentWidth);
+          if (!_offsetInitialized) {
+            _offsetX = _defaultOffset(
+              edo: edo,
+              touchFirst: touchFirst,
+              touchLast: touchLast,
+              rulerFirst: rulerFirst,
+              stepWidth: stepWidth,
+              viewportWidth: constraints.maxWidth,
+              minOffset: minOffset,
+            );
+            _offsetInitialized = true;
+          }
           final paintOffset = _offsetX.clamp(minOffset, 0.0);
 
           return Semantics(
@@ -79,6 +97,7 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
                 onDoubleTap: () => setState(() {
                   _scale = 1;
                   _offsetX = 0;
+                  _offsetInitialized = false;
                 }),
                 onTapUp: (details) {
                   final localX = details.localPosition.dx - paintOffset;
@@ -129,6 +148,25 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
         },
       ),
     );
+  }
+
+  double _defaultOffset({
+    required int edo,
+    required int touchFirst,
+    required int touchLast,
+    required int rulerFirst,
+    required double stepWidth,
+    required double viewportWidth,
+    required double minOffset,
+  }) {
+    final centerMidi = widget.initialCenterMidi;
+    if (centerMidi == null) return 0;
+    final centerStep = (centerMidi * edo / 12).clamp(
+      touchFirst.toDouble(),
+      touchLast.toDouble(),
+    );
+    final centerX = (centerStep - rulerFirst + 0.5) * stepWidth;
+    return (viewportWidth / 2 - centerX).clamp(minOffset, 0.0);
   }
 }
 

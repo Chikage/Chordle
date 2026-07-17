@@ -405,6 +405,38 @@ void main() {
   });
 
   group('Extra EDO rules and names', () {
+    test('generic EDO step range preserves the full A0 to C8 span', () {
+      expect(
+        edoStepRangeForMidiRange(24, fullPianoRange),
+        const IntRange(42, 216),
+      );
+      expect(
+        edoStepRangeForMidiRange(13, fullPianoRange),
+        const IntRange(23, 117),
+      );
+    });
+
+    test('random EDO roots stay playable and differ from the last root', () {
+      final range = edoStepRangeForMidiRange(24, fullPianoRange);
+      final offsets = <int>[8, 14, 32];
+      final random = math.Random(91);
+      final first = randomEdoBaseStep(offsets, range, random: random)!;
+      final second = randomEdoBaseStep(
+        offsets,
+        range,
+        excludingStep: first,
+        random: random,
+      )!;
+
+      expect(second, isNot(first));
+      for (final root in <int>[first, second]) {
+        expect(
+          offsets.map((offset) => root + offset),
+          everyElement(range.contains),
+        );
+      }
+    });
+
     test('extra playable range endpoints are C notes', () {
       expect(
         sanitizeExtraPlayableRange(const IntRange(34, 77)),

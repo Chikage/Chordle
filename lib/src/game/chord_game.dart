@@ -1089,8 +1089,16 @@ double midiNoteFrequency(int midiNote) {
 }
 
 IntRange extraStepRangeForMidiRange(int edo, IntRange noteRange) {
-  final normalizedEdo = sanitizeExtraEdo(edo);
   final playableRange = sanitizeExtraPlayableRange(noteRange);
+  return edoStepRangeForMidiRange(edo, playableRange);
+}
+
+IntRange edoStepRangeForMidiRange(int edo, IntRange noteRange) {
+  final normalizedEdo = sanitizeExtraEdo(edo);
+  final playableRange = IntRange.sorted(
+    noteRange.lowerBound.clamp(lowestPlayableMidiNote, highestPlayableMidiNote),
+    noteRange.upperBound.clamp(lowestPlayableMidiNote, highestPlayableMidiNote),
+  );
   final low = (playableRange.lowerBound * normalizedEdo / 12.0 - 0.000001)
       .ceil();
   final high = (playableRange.upperBound * normalizedEdo / 12.0 + 0.000001)
@@ -1165,6 +1173,39 @@ List<int> overtoneBaseCandidates(IntRange multiplierRange) {
 int overtoneBaseCandidateWeight(int index, int candidateCount) {
   final lowBias = math.max(candidateCount - index, 1);
   return lowBias * lowBias;
+}
+
+int? randomEdoBaseStep(
+  Iterable<int> relativeSteps,
+  IntRange playableRange, {
+  int? excludingStep,
+  math.Random? random,
+}) {
+  final offsets = relativeSteps.toList(growable: false);
+  if (offsets.isEmpty) return null;
+  final minimumOffset = math.min(0, offsets.reduce(math.min));
+  final maximumOffset = math.max(0, offsets.reduce(math.max));
+  final first = playableRange.lowerBound - minimumOffset;
+  final last = playableRange.upperBound - maximumOffset;
+  if (last < first) return null;
+
+  final allCandidates = <int>[
+    for (var step = first; step <= last; step += 1) step,
+  ];
+  final candidates = excludingStep != null && allCandidates.length > 1
+      ? allCandidates.where((step) => step != excludingStep).toList()
+      : allCandidates;
+
+  var totalWeight = 0;
+  for (var index = 0; index < candidates.length; index += 1) {
+    totalWeight += overtoneBaseCandidateWeight(index, candidates.length);
+  }
+  var ticket = (random ?? math.Random()).nextInt(totalWeight);
+  for (var index = 0; index < candidates.length; index += 1) {
+    ticket -= overtoneBaseCandidateWeight(index, candidates.length);
+    if (ticket < 0) return candidates[index];
+  }
+  return candidates.first;
 }
 
 final class _ExtraPitchName {
