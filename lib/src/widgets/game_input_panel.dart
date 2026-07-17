@@ -57,13 +57,18 @@ class GameInputPanel extends StatelessWidget {
                   flex: 11,
                   child: SizedBox(
                     height: 43,
-                    child: FilledButton.icon(
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
                       onPressed: audioReady ? onPlayTarget : null,
-                      icon: Icon(playIcon, size: 21),
-                      label: Text(
-                        playText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(playIcon, size: 20),
+                          const SizedBox(width: 5),
+                          Flexible(child: _FittedSingleLineText(playText)),
+                        ],
                       ),
                     ),
                   ),
@@ -79,11 +84,9 @@ class GameInputPanel extends StatelessWidget {
                       color: ChordleColors.surface,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
+                    child: _FittedSingleLineText(
                       selectedText,
                       textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: ChordleColors.text,
                         fontWeight: FontWeight.w800,
@@ -99,20 +102,22 @@ class GameInputPanel extends StatelessWidget {
                 Expanded(
                   flex: 10,
                   child: OutlinedButton(
-                    onPressed: canConfirm ? onConfirm : null,
-                    child: Text(
-                      confirmText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
+                    onPressed: canConfirm ? onConfirm : null,
+                    child: _FittedSingleLineText(confirmText),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   flex: 7,
                   child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     onPressed: canDelete ? onDelete : null,
-                    child: Text(deleteText, maxLines: 1),
+                    child: _FittedSingleLineText(deleteText),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -121,9 +126,10 @@ class GameInputPanel extends StatelessWidget {
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: ChordleColors.gray,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
                     onPressed: canSubmit ? onSubmit : null,
-                    child: Text(submitText, maxLines: 1),
+                    child: _FittedSingleLineText(submitText),
                   ),
                 ),
               ],
@@ -145,6 +151,33 @@ class GameInputPanel extends StatelessWidget {
             input,
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _FittedSingleLineText extends StatelessWidget {
+  const _FittedSingleLineText(
+    this.text, {
+    this.textAlign = TextAlign.center,
+    this.style,
+  });
+
+  final String text;
+  final TextAlign textAlign;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        textAlign: textAlign,
+        style: style,
       ),
     );
   }

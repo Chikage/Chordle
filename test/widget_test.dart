@@ -7,9 +7,94 @@ import 'package:chordle/src/screens/mode_selection_screen.dart';
 import 'package:chordle/src/theme.dart';
 import 'package:chordle/src/widgets/chord_board.dart';
 import 'package:chordle/src/widgets/game_chrome.dart';
+import 'package:chordle/src/widgets/game_input_panel.dart';
 import 'package:chordle/src/widgets/microtonal_keyboard.dart';
 
 void main() {
+  testWidgets('microtonal ruler selects immediately when a tap is released', (
+    tester,
+  ) async {
+    int? selectedStep;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildChordleTheme(),
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 360,
+              child: MicrotonalKeyboard(
+                edo: 12,
+                lowMidi: 48,
+                highMidi: 72,
+                initialCenterMidi: 60,
+                selectedStep: null,
+                valueColors: const <int, Color>{},
+                onStepPressed: (step) => selectedStep = step,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tapAt(tester.getCenter(find.byType(MicrotonalKeyboard)));
+
+    expect(selectedStep, 60);
+    await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  testWidgets('keeps input panel labels complete on narrow Android screens', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildChordleTheme().copyWith(platform: TargetPlatform.android),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(1.4)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomCenter,
+            child: GameInputPanel(
+              selectedText: 'EDO 隐含根音 · 输入比例',
+              confirmText: '按比例加入',
+              canConfirm: true,
+              canDelete: true,
+              canSubmit: true,
+              audioReady: true,
+              onPlayTarget: () {},
+              onConfirm: () {},
+              onDelete: () {},
+              onSubmit: () {},
+              deleteText: '顺序播放',
+              submitText: '清空本组',
+              input: const SizedBox(height: 120),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final label in <String>[
+      '播放和弦',
+      'EDO 隐含根音 · 输入比例',
+      '按比例加入',
+      '顺序播放',
+      '清空本组',
+    ]) {
+      final text = tester.widget<Text>(find.text(label));
+      expect(text.overflow, isNot(TextOverflow.ellipsis));
+      expect(text.softWrap, isFalse);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shows all four Chordle modes', (tester) async {
     await tester.pumpWidget(const ChordleApp());
 
@@ -168,7 +253,6 @@ void main() {
     expect(keyboard.initialCenterMidi, 60);
 
     await tester.tapAt(tester.getCenter(find.byType(MicrotonalKeyboard)));
-    await tester.pump(const Duration(milliseconds: 400));
     await tester.pump();
     expect(previewCalls, 1);
     expect(find.text('选中 C4'), findsOneWidget);

@@ -1,8 +1,28 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val releaseSigningPropertiesFile = rootProject.file("key.properties")
+val releaseSigningProperties =
+    Properties().apply {
+        if (releaseSigningPropertiesFile.exists()) {
+            releaseSigningPropertiesFile.inputStream().use { load(it) }
+        }
+    }
+val releaseStoreFile = releaseSigningProperties.getProperty("storeFile") ?: "../key.jks"
+val releaseStorePassword =
+    releaseSigningProperties.getProperty("storePassword")
+        ?: providers.gradleProperty("sign.store.password").orNull
+val releaseKeyAlias =
+    releaseSigningProperties.getProperty("keyAlias")
+        ?: providers.gradleProperty("sign.key.alias").orNull
+val releaseKeyPassword =
+    releaseSigningProperties.getProperty("keyPassword")
+        ?: providers.gradleProperty("sign.key.password").orNull
 
 android {
     namespace = "icu.ringona.chordle"
@@ -48,10 +68,28 @@ android {
         }
     }
 
+    signingConfigs {
+        if (
+            releaseStorePassword != null &&
+            releaseKeyAlias != null &&
+            releaseKeyPassword != null
+        ) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Keep local/CI release builds usable until a private release key is supplied.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
+                ?: error(
+                    "Release signing requires android/key.properties or the " +
+                        "corresponding sign.* Gradle properties.",
+                )
         }
     }
 

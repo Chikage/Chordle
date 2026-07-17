@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
@@ -38,6 +39,9 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
   double _startOffset = 0;
   double _viewportWidth = 0;
   bool _offsetInitialized = false;
+  final Map<int, Offset> _pointerDownPositions = <int, Offset>{};
+  final Set<int> _movedPointers = <int>{};
+  bool _gestureHadMultiplePointers = false;
 
   @override
   void didUpdateWidget(MicrotonalKeyboard oldWidget) {
@@ -92,55 +96,61 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
             label: '$edo EDO 可缩放标尺，双指缩放，横向拖动',
             child: ClipRRect(
               borderRadius: BorderRadius.circular(7),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onDoubleTap: () => setState(() {
-                  _scale = 1;
-                  _offsetX = 0;
-                  _offsetInitialized = false;
-                }),
-                onTapUp: (details) {
-                  final localX = details.localPosition.dx - paintOffset;
+              child: Listener(
+                onPointerDown: _handlePointerDown,
+                onPointerMove: _handlePointerMove,
+                onPointerUp: (event) {
+                  if (!_finishPointer(event)) return;
+                  final localX = event.localPosition.dx - paintOffset;
                   if (localX < 0 || stepWidth <= 0) return;
                   final step = rulerFirst + (localX / stepWidth).floor();
                   if (step >= touchFirst && step <= touchLast) {
                     widget.onStepPressed(step);
                   }
                 },
-                onScaleStart: (details) {
-                  _startScale = _scale;
-                  _startOffset = paintOffset;
-                },
-                onScaleUpdate: (details) {
-                  final nextScale = (_startScale * details.scale).clamp(
-                    0.64,
-                    3.6,
-                  );
-                  final nextContentWidth = count * baseStepWidth * nextScale;
-                  final nextMinOffset = math.min(
-                    0.0,
-                    _viewportWidth - nextContentWidth,
-                  );
-                  setState(() {
-                    _scale = nextScale;
-                    _offsetX = (_startOffset + details.focalPointDelta.dx)
-                        .clamp(nextMinOffset, 0.0);
-                    _startOffset = _offsetX;
-                  });
-                },
-                child: CustomPaint(
-                  painter: _MicrotonalPainter(
-                    edo: edo,
-                    rulerFirst: rulerFirst,
-                    rulerLast: rulerLast,
-                    touchFirst: touchFirst,
-                    touchLast: touchLast,
-                    stepWidth: stepWidth,
-                    offsetX: paintOffset,
-                    selectedStep: widget.selectedStep,
-                    valueColors: widget.valueColors,
+                onPointerCancel: _cancelPointer,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTap: () => setState(() {
+                    _scale = 1;
+                    _offsetX = 0;
+                    _offsetInitialized = false;
+                  }),
+                  onScaleStart: (details) {
+                    _startScale = _scale;
+                    _startOffset = paintOffset;
+                  },
+                  onScaleUpdate: (details) {
+                    final nextScale = (_startScale * details.scale).clamp(
+                      0.64,
+                      3.6,
+                    );
+                    final nextContentWidth = count * baseStepWidth * nextScale;
+                    final nextMinOffset = math.min(
+                      0.0,
+                      _viewportWidth - nextContentWidth,
+                    );
+                    setState(() {
+                      _scale = nextScale;
+                      _offsetX = (_startOffset + details.focalPointDelta.dx)
+                          .clamp(nextMinOffset, 0.0);
+                      _startOffset = _offsetX;
+                    });
+                  },
+                  child: CustomPaint(
+                    painter: _MicrotonalPainter(
+                      edo: edo,
+                      rulerFirst: rulerFirst,
+                      rulerLast: rulerLast,
+                      touchFirst: touchFirst,
+                      touchLast: touchLast,
+                      stepWidth: stepWidth,
+                      offsetX: paintOffset,
+                      selectedStep: widget.selectedStep,
+                      valueColors: widget.valueColors,
+                    ),
+                    child: const SizedBox.expand(),
                   ),
-                  child: const SizedBox.expand(),
                 ),
               ),
             ),
@@ -167,6 +177,44 @@ class _MicrotonalKeyboardState extends State<MicrotonalKeyboard> {
     );
     final centerX = (centerStep - rulerFirst + 0.5) * stepWidth;
     return (viewportWidth / 2 - centerX).clamp(minOffset, 0.0);
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (_pointerDownPositions.isEmpty) {
+      _gestureHadMultiplePointers = false;
+    }
+    _pointerDownPositions[event.pointer] = event.localPosition;
+    if (_pointerDownPositions.length > 1) {
+      _gestureHadMultiplePointers = true;
+    }
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    final downPosition = _pointerDownPositions[event.pointer];
+    if (downPosition != null &&
+        (event.localPosition - downPosition).distance > kTouchSlop) {
+      _movedPointers.add(event.pointer);
+    }
+  }
+
+  bool _finishPointer(PointerUpEvent event) {
+    final hadPointer = _pointerDownPositions.remove(event.pointer) != null;
+    final moved = _movedPointers.remove(event.pointer);
+    final isTap = hadPointer && !moved && !_gestureHadMultiplePointers;
+    if (_pointerDownPositions.isEmpty) {
+      _gestureHadMultiplePointers = false;
+      _movedPointers.clear();
+    }
+    return isTap;
+  }
+
+  void _cancelPointer(PointerCancelEvent event) {
+    _pointerDownPositions.remove(event.pointer);
+    _movedPointers.remove(event.pointer);
+    if (_pointerDownPositions.isEmpty) {
+      _gestureHadMultiplePointers = false;
+      _movedPointers.clear();
+    }
   }
 }
 
