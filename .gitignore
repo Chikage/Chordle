@@ -26,3 +26,4 @@ key.properties
 !android/gradlew
 !android/gradlew.bat
 !android/gradle/wrapper/gradle-wrapper.jar
+.DS_Store
