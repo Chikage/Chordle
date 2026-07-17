@@ -45,16 +45,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('加入和弦'), findsOneWidget);
-    expect(find.text('添加和弦'), findsOneWidget);
+    expect(find.text('添加和弦'), findsNothing);
+    expect(find.byTooltip('添加和弦'), findsOneWidget);
     expect(find.text('顺序播放'), findsOneWidget);
-    expect(find.text('随机播放'), findsOneWidget);
+    expect(find.text('随机播放'), findsNothing);
     expect(find.text('播放和弦'), findsOneWidget);
     expect(find.text('停止播放'), findsNothing);
     expect(find.text('从下方标尺选音并加入和弦'), findsOneWidget);
     expect(find.text('EDO 刻度尺输入'), findsOneWidget);
 
-    await tester.tap(find.text('随机播放'));
+    await tester.tap(find.text('顺序播放'));
     await tester.pump();
+    expect(find.text('顺序播放'), findsNothing);
+    expect(find.text('随机播放'), findsOneWidget);
     expect(find.text('停止播放'), findsNothing);
 
     await tester.drag(find.text('EDO 刻度尺输入'), const Offset(0, -80));
@@ -63,11 +66,63 @@ void main() {
     expect(find.text('数字比例输入'), findsOneWidget);
     expect(find.text('/'), findsOneWidget);
     expect(find.text('按比例加入'), findsOneWidget);
+    expect(find.text('输入比例，例如 3/2'), findsNothing);
 
-    await tester.tap(find.text('添加和弦'));
+    await tester.tap(find.text('3'));
+    await tester.tap(find.text('/'));
+    await tester.tap(find.text('2'));
+    await tester.pump();
+    expect(find.text('EDO 隐含根音 · 3/2'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('添加和弦'));
     await tester.pump();
 
     expect(find.textContaining('和弦 2'), findsWidgets);
+  });
+
+  testWidgets('Free chord tones use a compact four-column grid', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const channel = MethodChannel('icu.ringona.chordle/platform');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          return switch (call.method) {
+            'loadSettings' => <String, Object>{},
+            'prepareAudio' => true,
+            _ => null,
+          };
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+
+    await tester.pumpWidget(const ChordleApp());
+    await tester.tap(find.text('Free'));
+    await tester.pumpAndSettle();
+
+    for (var index = 0; index < 5; index++) {
+      final keyboard = tester.widget<MicrotonalKeyboard>(
+        find.byType(MicrotonalKeyboard),
+      );
+      keyboard.onStepPressed(100 + index);
+      await tester.pump();
+      await tester.tap(find.text('加入和弦'));
+      await tester.pump();
+    }
+
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    final delegate =
+        grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+    expect(delegate.crossAxisCount, 4);
+    expect(
+      (tester.getSize(find.byType(GridView)).width - 18) / 4,
+      lessThan(90),
+    );
+    expect(find.text('刻度尺'), findsNWidgets(5));
   });
 
   testWidgets('Free always previews the full ruler and hides range settings', (
@@ -179,7 +234,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('3/2'), findsOneWidget);
-    expect(find.text('添加和弦'), findsOneWidget);
+    expect(find.byTooltip('添加和弦'), findsOneWidget);
     expect(find.text('正在编辑'), findsOneWidget);
     expect(find.text('从低到高'), findsOneWidget);
     expect(find.byTooltip('播放和弦 1'), findsOneWidget);
@@ -189,7 +244,7 @@ void main() {
     await tester.tap(find.text('播放和弦'));
     await tester.pump();
     expect(find.text('停止播放'), findsOneWidget);
-    expect(find.text('添加和弦'), findsNothing);
+    expect(find.byTooltip('添加和弦'), findsNothing);
     expect(find.text('正在编辑'), findsNothing);
     expect(find.text('从低到高'), findsNothing);
     expect(find.byTooltip('播放和弦 1'), findsNothing);
@@ -198,7 +253,7 @@ void main() {
     await tester.tap(find.text('停止播放'));
     await tester.pump();
     expect(find.text('播放和弦'), findsOneWidget);
-    expect(find.text('添加和弦'), findsOneWidget);
+    expect(find.byTooltip('添加和弦'), findsOneWidget);
     expect(find.text('正在编辑'), findsOneWidget);
     expect(find.text('从低到高'), findsOneWidget);
     expect(find.byTooltip('播放和弦 1'), findsOneWidget);
@@ -231,7 +286,7 @@ void main() {
 
     for (var index = 0; index < 6; index++) {
       if (index > 0) {
-        await tester.tap(find.text('添加和弦'));
+        await tester.tap(find.byTooltip('添加和弦'));
         await tester.pumpAndSettle();
       }
       final keyboard = tester.widget<MicrotonalKeyboard>(

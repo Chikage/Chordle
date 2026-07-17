@@ -121,9 +121,14 @@ class _FreeScreenState extends State<FreeScreen> {
     unawaited(_audio.allSoundOff());
   }
 
-  void _setPlaybackMode(_FreePlaybackMode mode) {
-    if (_isSequencePlaying || mode == _playbackMode) return;
-    setState(() => _playbackMode = mode);
+  void _togglePlaybackMode() {
+    if (_isSequencePlaying) return;
+    setState(() {
+      _playbackMode = switch (_playbackMode) {
+        _FreePlaybackMode.sequential => _FreePlaybackMode.random,
+        _FreePlaybackMode.random => _FreePlaybackMode.sequential,
+      };
+    });
   }
 
   Future<void> _playStepValuesNow(
@@ -707,27 +712,6 @@ class _FreeScreenState extends State<FreeScreen> {
     }
   }
 
-  void _deleteLastStep() {
-    if (_activeGroup.isEmpty) return;
-    final groupId = _collection.activeGroupId;
-    final toneId = _activeGroup.tones.last.id;
-    setState(() {
-      _cancelPlaybackForEdit();
-      _clearSwapSelections();
-      _collection.removeToneById(
-        groupId,
-        toneId,
-        clearRatiosWhenRemovingRoot: false,
-      );
-      if (_jiMode) {
-        _recalculateJiGroup(groupId);
-      } else {
-        _recalculateEdoGroup(groupId);
-      }
-      _ratioInput = '';
-    });
-  }
-
   void _clearActiveChord() {
     if (_activeGroup.isEmpty) return;
     setState(() {
@@ -1076,11 +1060,11 @@ class _FreeScreenState extends State<FreeScreen> {
           constraints: const BoxConstraints(maxWidth: 520),
           child: const SingleChildScrollView(
             child: Text(
-              '使用“添加和弦”建立多组和弦，先选择要编辑的组，再从 EDO 标尺加入音高。在输入区域上下滑动，可在刻度尺和数字比例键盘之间切换。\n\n'
+              '使用和弦列表底部的“+”建立多组和弦，新增空组会自动进入编辑状态；再从 EDO 标尺加入音高。在输入区域上下滑动，可在刻度尺和数字比例键盘之间切换，比例内容统一显示在播放按钮右侧。\n\n'
               '长按组内的音可将它设为根音 1/1。随后输入 3/2、5/4 等比例并点“按比例加入”，会用纯 EDO 的逐质数取整算法计算相对 Step；未指定根音时使用输入的最低音，整组只有比例时则随机选择隐含 EDO 根音，且不播放该根音本身。\n\n'
               '设置中开启 JI 后，比例不再量化到 EDO，而是按根音或绝对最低音的精确频率比播放，卡片仅显示频率和比例。若整组只有比例而没有绝对参考，同样会按 Overtones 的低音权重随机选择隐含根音。\n\n'
               '长按音还可选择删除或进入跨组音交换；带比例标签的音进入新组后，会按新组根音重新计算，没有根音时改用该组最低音。每组的“从低到高”会排序组内音，“交换整组”需要依次选择两组。\n\n'
-              '上方“顺序播放/随机播放”只选择播放策略，点击下方“播放和弦”会循环播放全部非空组；单组播放也会持续循环，直到点击“停止播放”。每轮会为无参考的 EDO/JI 组选择不同隐含根音，播放期间列表会自动滚动到当前组并收起编辑按钮。\n\n'
+              '输入面板中的“顺序播放/随机播放”按钮可单击切换策略；“播放和弦”会循环播放全部非空组，单组播放也会持续循环，直到点击“停止播放”。每轮会为无参考的 EDO/JI 组选择不同隐含根音，播放期间列表会自动滚动到当前组并收起编辑按钮。\n\n'
               'Free 使用 Extra 的 1–72 EDO 标尺模板，但拥有独立的 A0–C8 全音域，并以 C4 作为标尺默认显示中心。',
             ),
           ),
@@ -1213,13 +1197,11 @@ class _FreeScreenState extends State<FreeScreen> {
       groupSwapSourceId: _groupSwapSourceId,
       audioReady: _audioReady,
       isSequencePlaying: _isSequencePlaying,
-      playbackMode: _playbackMode,
       jiMode: _jiMode,
       scrollController: _groupScrollController,
       groupCardKey: _groupCardKey,
       edo: _edo,
       onAddGroup: _addGroup,
-      onPlaybackModeChanged: _setPlaybackMode,
       onSelectGroup: _selectGroup,
       onPlayGroup: (groupId) => unawaited(_playGroupNow(groupId)),
       onSortGroup: _sortGroup,
@@ -1255,21 +1237,22 @@ class _FreeScreenState extends State<FreeScreen> {
     final lowestAnchor = group.lowestAbsoluteAnchor;
     final lowestStepAnchor = group.lowestStepAnchor;
     final ratioMode = _inputMode == _FreeInputMode.ratio;
+    final ratioInputLabel = _ratioInput.isEmpty ? '输入比例' : _ratioInput;
     final hasPlayableGroup = _collection.groups.any(
       (candidate) => !candidate.isEmpty,
     );
     final selectedText = ratioMode
         ? _jiMode
               ? root?.frequencyHz != null
-                    ? '根音 ${frequencyLabel(root!.frequencyHz)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
+                    ? '根音 ${frequencyLabel(root!.frequencyHz)} · $ratioInputLabel'
                     : lowestAnchor?.frequencyHz != null
-                    ? '最低音 ${frequencyLabel(lowestAnchor!.frequencyHz)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
-                    : 'JI 比例输入 · 播放时随机隐含根音'
+                    ? '最低音 ${frequencyLabel(lowestAnchor!.frequencyHz)} · $ratioInputLabel'
+                    : 'JI 隐含根音 · $ratioInputLabel'
               : root == null
               ? lowestStepAnchor == null
-                    ? 'EDO 比例输入 · 播放时随机隐含根音'
-                    : '最低音 ${extraStepLabel(lowestStepAnchor.step, _edo)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
-              : '根音 ${extraStepLabel(root.step, _edo)} · ${_ratioInput.isEmpty ? '输入比例' : _ratioInput}'
+                    ? 'EDO 隐含根音 · $ratioInputLabel'
+                    : '最低音 ${extraStepLabel(lowestStepAnchor.step, _edo)} · $ratioInputLabel'
+              : '根音 ${extraStepLabel(root.step, _edo)} · $ratioInputLabel'
         : selected == null
         ? (_jiMode ? '未选绝对参考音' : '未选 EDO 音')
         : _jiMode
@@ -1280,7 +1263,7 @@ class _FreeScreenState extends State<FreeScreen> {
       selectedText: selectedText,
       confirmText: ratioMode ? '按比例加入' : '加入和弦',
       canConfirm: ratioMode ? _ratioInput.isNotEmpty : selected != null,
-      canDelete: !group.isEmpty,
+      canDelete: !_isSequencePlaying,
       canSubmit: !group.isEmpty,
       audioReady: _isSequencePlaying || (_audioReady && hasPlayableGroup),
       onPlayTarget: _isSequencePlaying
@@ -1291,12 +1274,15 @@ class _FreeScreenState extends State<FreeScreen> {
           ? Icons.stop_rounded
           : Icons.play_arrow_rounded,
       onConfirm: ratioMode ? _addRatioTone : _addSelectedStep,
-      onDelete: _deleteLastStep,
+      onDelete: _togglePlaybackMode,
       onSubmit: _clearActiveChord,
       answerText: group.isEmpty
           ? '正在编辑和弦 $groupNumber · 尚未加入音高'
           : '和弦 $groupNumber：$labels',
       submitText: '清空本组',
+      deleteText: _playbackMode == _FreePlaybackMode.sequential
+          ? '顺序播放'
+          : '随机播放',
       compact: compact,
       input: _FreeInputSwitcher(
         mode: _inputMode,
@@ -1314,7 +1300,6 @@ class _FreeScreenState extends State<FreeScreen> {
             compact: compact,
           ),
           _FreeInputMode.ratio => RatioNumberPad(
-            value: _ratioInput,
             onKeyPressed: _appendRatioKey,
             onBackspace: _backspaceRatio,
             onClear: _clearRatioInput,
@@ -1411,13 +1396,11 @@ class _FreeChordList extends StatelessWidget {
     required this.groupSwapSourceId,
     required this.audioReady,
     required this.isSequencePlaying,
-    required this.playbackMode,
     required this.jiMode,
     required this.scrollController,
     required this.groupCardKey,
     required this.edo,
     required this.onAddGroup,
-    required this.onPlaybackModeChanged,
     required this.onSelectGroup,
     required this.onPlayGroup,
     required this.onSortGroup,
@@ -1434,13 +1417,11 @@ class _FreeChordList extends StatelessWidget {
   final int? groupSwapSourceId;
   final bool audioReady;
   final bool isSequencePlaying;
-  final _FreePlaybackMode playbackMode;
   final bool jiMode;
   final ScrollController scrollController;
   final GlobalKey Function(int groupId) groupCardKey;
   final int edo;
   final VoidCallback onAddGroup;
-  final ValueChanged<_FreePlaybackMode> onPlaybackModeChanged;
   final ValueChanged<int> onSelectGroup;
   final ValueChanged<int> onPlayGroup;
   final ValueChanged<int> onSortGroup;
@@ -1466,42 +1447,6 @@ class _FreeChordList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!isSequencePlaying)
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  FilledButton.icon(
-                    onPressed: onAddGroup,
-                    icon: const Icon(Icons.add_rounded, size: 19),
-                    label: const Text('添加和弦'),
-                  ),
-                  SegmentedButton<_FreePlaybackMode>(
-                    segments: const [
-                      ButtonSegment<_FreePlaybackMode>(
-                        value: _FreePlaybackMode.sequential,
-                        icon: Icon(Icons.playlist_play_rounded, size: 18),
-                        label: Text('顺序播放'),
-                      ),
-                      ButtonSegment<_FreePlaybackMode>(
-                        value: _FreePlaybackMode.random,
-                        icon: Icon(Icons.shuffle_rounded, size: 17),
-                        label: Text('随机播放'),
-                      ),
-                    ],
-                    selected: <_FreePlaybackMode>{playbackMode},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (selection) =>
-                        onPlaybackModeChanged(selection.single),
-                    style: const ButtonStyle(
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           if (!isSequencePlaying && interactionHint != null)
             Container(
               color: ChordleColors.selected.withValues(alpha: 0.14),
@@ -1515,7 +1460,6 @@ class _FreeChordList extends StatelessWidget {
                 ),
               ),
             ),
-          if (!isSequencePlaying) const Divider(height: 1),
           Expanded(
             child: ListView.separated(
               controller: scrollController,
@@ -1550,6 +1494,19 @@ class _FreeChordList extends StatelessWidget {
               },
             ),
           ),
+          if (!isSequencePlaying) ...[
+            const Divider(height: 1),
+            SizedBox(
+              height: 48,
+              child: Center(
+                child: IconButton.filledTonal(
+                  onPressed: onAddGroup,
+                  tooltip: '添加和弦',
+                  icon: const Icon(Icons.add_rounded, size: 24),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1679,31 +1636,44 @@ class _FreeChordGroupCard extends StatelessWidget {
                 ),
               )
             else
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final tone in group.tones)
-                    _FreeChordTile(
-                      label: jiMode
-                          ? frequencyLabel(tone.frequencyHz)
-                          : tone.step < 0
-                          ? '待随机'
-                          : extraStepLabel(tone.step, edo),
-                      ratioLabel: group.isRoot(tone)
-                          ? '1/1 · 根音'
-                          : tone.ratioLabel ?? (jiMode ? '' : '刻度尺'),
-                      compact: compact,
-                      isRoot: group.isRoot(tone),
-                      swapSource:
-                          noteSwapSource?.groupId == group.id &&
-                          noteSwapSource?.toneId == tone.id,
-                      onTap: compact ? null : () => onNoteTap(tone.id),
-                      onLongPress: compact
-                          ? null
-                          : () => onNoteLongPress(tone.id),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: compact ? 370 : 402),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    primary: false,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: group.tones.length,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4,
+                      crossAxisSpacing: 6,
+                      mainAxisSpacing: 6,
+                      mainAxisExtent: compact ? 56 : 66,
                     ),
-                ],
+                    itemBuilder: (context, index) {
+                      final tone = group.tones[index];
+                      return _FreeChordTile(
+                        label: jiMode
+                            ? frequencyLabel(tone.frequencyHz)
+                            : tone.step < 0
+                            ? '待随机'
+                            : extraStepLabel(tone.step, edo),
+                        ratioLabel: group.isRoot(tone)
+                            ? '1/1 · 根音'
+                            : tone.ratioLabel ?? (jiMode ? '' : '刻度尺'),
+                        isRoot: group.isRoot(tone),
+                        swapSource:
+                            noteSwapSource?.groupId == group.id &&
+                            noteSwapSource?.toneId == tone.id,
+                        onTap: compact ? null : () => onNoteTap(tone.id),
+                        onLongPress: compact
+                            ? null
+                            : () => onNoteLongPress(tone.id),
+                      );
+                    },
+                  ),
+                ),
               ),
             if (!compact) ...[
               const SizedBox(height: 8),
@@ -1741,7 +1711,6 @@ class _FreeChordTile extends StatelessWidget {
   const _FreeChordTile({
     required this.label,
     required this.ratioLabel,
-    required this.compact,
     required this.isRoot,
     required this.swapSource,
     required this.onTap,
@@ -1750,7 +1719,6 @@ class _FreeChordTile extends StatelessWidget {
 
   final String label;
   final String ratioLabel;
-  final bool compact;
   final bool isRoot;
   final bool swapSource;
   final VoidCallback? onTap;
@@ -1758,76 +1726,72 @@ class _FreeChordTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: compact ? 100 : 106,
-      height: compact ? 56 : 66,
-      child: Material(
-        color: swapSource
-            ? ChordleColors.selected.withValues(alpha: 0.24)
-            : ChordleColors.elevatedSurface,
-        shape: RoundedRectangleBorder(
-          side: BorderSide(
-            color: swapSource
-                ? ChordleColors.selected
-                : isRoot
-                ? ChordleColors.yellow
-                : ChordleColors.green,
-            width: swapSource ? 2 : 1.5,
-          ),
-          borderRadius: BorderRadius.circular(8),
+    return Material(
+      color: swapSource
+          ? ChordleColors.selected.withValues(alpha: 0.24)
+          : ChordleColors.elevatedSurface,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(
+          color: swapSource
+              ? ChordleColors.selected
+              : isRoot
+              ? ChordleColors.yellow
+              : ChordleColors.green,
+          width: swapSource ? 2 : 1.5,
         ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Stack(
-            children: [
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: ChordleColors.text,
-                          fontWeight: FontWeight.w900,
-                        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Stack(
+          children: [
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: ChordleColors.text,
+                        fontWeight: FontWeight.w900,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        ratioLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: isRoot
-                              ? ChordleColors.yellow
-                              : ChordleColors.muted,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
-                        ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      ratioLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: isRoot
+                            ? ChordleColors.yellow
+                            : ChordleColors.muted,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              if (swapSource)
-                const Positioned(
-                  top: 3,
-                  right: 4,
-                  child: Icon(
-                    Icons.swap_horiz_rounded,
-                    color: ChordleColors.selected,
-                    size: 15,
-                  ),
+            ),
+            if (swapSource)
+              const Positioned(
+                top: 3,
+                right: 4,
+                child: Icon(
+                  Icons.swap_horiz_rounded,
+                  color: ChordleColors.selected,
+                  size: 15,
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
