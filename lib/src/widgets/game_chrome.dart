@@ -49,14 +49,16 @@ class ChordleHeader extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text(
+                  Text(
                     'Chordle',
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.clip,
                     style: TextStyle(
                       color: ChordleColors.text,
-                      fontFamily: 'serif',
+                      fontFamily: chordleWordmarkFontFamily(
+                        Theme.of(context).platform,
+                      ),
                       fontSize: 27,
                       height: 0.95,
                       fontWeight: FontWeight.w900,

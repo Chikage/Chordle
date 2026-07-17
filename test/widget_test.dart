@@ -6,6 +6,7 @@ import 'package:chordle/src/app.dart';
 import 'package:chordle/src/screens/mode_selection_screen.dart';
 import 'package:chordle/src/theme.dart';
 import 'package:chordle/src/widgets/chord_board.dart';
+import 'package:chordle/src/widgets/game_chrome.dart';
 import 'package:chordle/src/widgets/microtonal_keyboard.dart';
 
 void main() {
@@ -487,6 +488,26 @@ void main() {
           home: ModeSelectionScreen(
             onModeSelected: (_) {},
             onFreeSelected: () {},
+          ),
+        ),
+      );
+
+      final title = tester.widget<Text>(find.text('Chordle'));
+      expect(title.style?.fontFamily, fontFamily);
+      expect(title.style?.fontWeight, FontWeight.w900);
+    });
+
+    testWidgets('uses the same $platform wordmark on subpages', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildChordleTheme().copyWith(platform: platform),
+          home: Scaffold(
+            body: ChordleHeader(
+              modeLabel: 'Normal',
+              onBack: () {},
+              onHelp: () {},
+              onSettings: () {},
+            ),
           ),
         ),
       );
