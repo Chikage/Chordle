@@ -1464,10 +1464,45 @@ class _FreeChordList extends StatelessWidget {
             child: ListView.separated(
               controller: scrollController,
               padding: const EdgeInsets.all(10),
-              itemCount: groups.length,
+              itemCount: groups.length + (isSequencePlaying ? 0 : 1),
               separatorBuilder: (_, _) =>
                   SizedBox(height: isSequencePlaying ? 7 : 10),
               itemBuilder: (context, index) {
+                if (index == groups.length) {
+                  return Center(
+                    child: Semantics(
+                      button: true,
+                      label: '添加和弦',
+                      child: Tooltip(
+                        message: '添加和弦',
+                        child: Material(
+                          color: ChordleColors.green,
+                          elevation: 3,
+                          shadowColor: Colors.black.withValues(alpha: 0.5),
+                          shape: const CircleBorder(
+                            side: BorderSide(
+                              color: Color(0x66FFFFFF),
+                              width: 1.5,
+                            ),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: onAddGroup,
+                            customBorder: const CircleBorder(),
+                            child: const SizedBox.square(
+                              dimension: 52,
+                              child: Icon(
+                                Icons.add_rounded,
+                                color: Colors.white,
+                                size: 32,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }
                 final group = groups[index];
                 return _FreeChordGroupCard(
                   key: groupCardKey(group.id),
@@ -1494,19 +1529,6 @@ class _FreeChordList extends StatelessWidget {
               },
             ),
           ),
-          if (!isSequencePlaying) ...[
-            const Divider(height: 1),
-            SizedBox(
-              height: 48,
-              child: Center(
-                child: IconButton.filledTonal(
-                  onPressed: onAddGroup,
-                  tooltip: '添加和弦',
-                  icon: const Icon(Icons.add_rounded, size: 24),
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
