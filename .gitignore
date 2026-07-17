@@ -1,14 +1,28 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
 .gradle/
 .idea/
 .kotlin/
-build/
-app/build/
-app/.cxx/
-local.properties
+**/.cxx/
+**/local.properties
 *.iml
 
 *.jks
+*.keystore
+key.properties
+*.apk
+*.aab
 .DS_Store
 .codegraph/daemon.pid
-*.apk
-.DS_Store
+
+# Android Studio must be able to use the checked-in Gradle wrapper.
+!android/gradlew
+!android/gradlew.bat
+!android/gradle/wrapper/gradle-wrapper.jar
