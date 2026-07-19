@@ -1,14 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/chordle_mode.dart';
 import '../theme.dart';
 
-enum _HomeMode { normal, extra, overtones, free }
+final _repositoryUri = Uri.parse('https://github.com/Chikage/Chordle');
+
+Future<void> _openRepository(BuildContext context) async {
+  var opened = false;
+  try {
+    opened = await launchUrl(
+      _repositoryUri,
+      mode: LaunchMode.externalApplication,
+    );
+  } on Exception {
+    // Show the fallback message below when the platform cannot open the URL.
+  }
+
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('无法打开 GitHub 链接')));
+  }
+}
+
+enum _HomeMode { normal, extra, ratioMcq, overtones, free }
 
 extension on _HomeMode {
   String get label => switch (this) {
     _HomeMode.normal => 'Normal',
     _HomeMode.extra => 'Extra',
+    _HomeMode.ratioMcq => 'MCQ of Ratio',
     _HomeMode.free => 'Free',
     _HomeMode.overtones => 'Overtones',
   };
@@ -16,47 +39,60 @@ extension on _HomeMode {
   String get description => switch (this) {
     _HomeMode.normal => '标准十二平均律和弦听辨',
     _HomeMode.extra => '1–72 EDO 微分音听辨',
+    _HomeMode.ratioMcq => '在 EDO 与纯律中辨认有理比例',
     _HomeMode.free => '自由设置并试听 EDO 和弦',
     _HomeMode.overtones => '基音与整数倍频听辨',
-  };
-
-  ChordleMode? get gameMode => switch (this) {
-    _HomeMode.normal => ChordleMode.normal,
-    _HomeMode.extra => ChordleMode.extra,
-    _HomeMode.free => null,
-    _HomeMode.overtones => ChordleMode.overtones,
   };
 
   Color? get buttonBackgroundColor => switch (this) {
     _HomeMode.normal => ChordleColors.green,
     _HomeMode.extra => ChordleColors.yellow,
+    _HomeMode.ratioMcq => ChordleColors.ratioMcq,
     _HomeMode.free => null,
     _HomeMode.overtones => ChordleColors.iconGray,
+  };
+
+  Color get buttonForegroundColor => switch (this) {
+    _HomeMode.ratioMcq => const Color(0xFF172033),
+    _ => Colors.white,
   };
 }
 
 class ModeSelectionScreen extends StatelessWidget {
   const ModeSelectionScreen({
     required this.onModeSelected,
+    required this.onRatioMcqSelected,
     required this.onFreeSelected,
     super.key,
   });
 
   final ValueChanged<ChordleMode> onModeSelected;
+  final VoidCallback onRatioMcqSelected;
   final VoidCallback onFreeSelected;
 
   void _selectMode(_HomeMode mode) {
-    final gameMode = mode.gameMode;
-    if (gameMode == null) {
-      onFreeSelected();
-    } else {
-      onModeSelected(gameMode);
+    switch (mode) {
+      case _HomeMode.normal:
+        onModeSelected(ChordleMode.normal);
+      case _HomeMode.extra:
+        onModeSelected(ChordleMode.extra);
+      case _HomeMode.ratioMcq:
+        onRatioMcqSelected();
+      case _HomeMode.overtones:
+        onModeSelected(ChordleMode.overtones);
+      case _HomeMode.free:
+        onFreeSelected();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        minimum: EdgeInsets.only(bottom: 8),
+        child: SizedBox(height: 48, child: Center(child: _GithubLink())),
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -77,6 +113,28 @@ class ModeSelectionScreen extends StatelessWidget {
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _GithubLink extends StatelessWidget {
+  const _GithubLink();
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      link: true,
+      label: '在 GitHub 上查看 Chikage/Chordle',
+      child: IconButton(
+        key: const Key('github_repository_link'),
+        tooltip: 'Chikage/Chordle on GitHub',
+        onPressed: () => _openRepository(context),
+        icon: const FaIcon(
+          FontAwesomeIcons.github,
+          color: ChordleColors.muted,
+          size: 24,
         ),
       ),
     );
@@ -186,6 +244,7 @@ class _ModeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final backgroundColor = mode.buttonBackgroundColor;
     final filled = backgroundColor != null;
+    final foregroundColor = mode.buttonForegroundColor;
     final child = Row(
       children: [
         Expanded(
@@ -195,7 +254,8 @@ class _ModeButton extends StatelessWidget {
             children: [
               Text(
                 mode.label,
-                style: const TextStyle(
+                style: TextStyle(
+                  color: filled ? foregroundColor : null,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
                 ),
@@ -207,7 +267,7 @@ class _ModeButton extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: filled
-                      ? Colors.white.withValues(alpha: 0.82)
+                      ? foregroundColor.withValues(alpha: 0.78)
                       : ChordleColors.muted,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
@@ -219,7 +279,7 @@ class _ModeButton extends StatelessWidget {
         const SizedBox(width: 12),
         Icon(
           Icons.arrow_forward_rounded,
-          color: filled ? Colors.white : ChordleColors.muted,
+          color: filled ? foregroundColor : ChordleColors.muted,
         ),
       ],
     );
@@ -229,7 +289,10 @@ class _ModeButton extends StatelessWidget {
         width: double.infinity,
         height: 64,
         child: FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: backgroundColor),
+          style: FilledButton.styleFrom(
+            backgroundColor: backgroundColor,
+            foregroundColor: foregroundColor,
+          ),
           onPressed: onPressed,
           child: child,
         ),

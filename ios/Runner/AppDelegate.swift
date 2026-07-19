@@ -100,6 +100,11 @@ import UIKit
       "extraToneCount": storedInt(defaults, key: "extraChordToneCount", fallback: 3),
       "extraEdo": storedInt(defaults, key: "extraEdo", fallback: 24),
       "freeJiEnabled": defaults.object(forKey: "freeJiEnabled") as? Bool ?? false,
+      "ratioMcqEdos": defaults.object(forKey: "ratioMcqEdos") ?? "[12]",
+      "ratioMcqJiEnabled": defaults.object(forKey: "ratioMcqJiEnabled") as? Bool ?? false,
+      "ratioMcqRatios": defaults.object(forKey: "ratioMcqRatios") ?? "[\"3/2\",\"4/3\"]",
+      "ratioMcqOptionCount": storedInt(defaults, key: "ratioMcqOptionCount", fallback: 2),
+      "ratioMcqConfigured": defaults.object(forKey: "ratioMcqConfigured") as? Bool ?? false,
       "overtoneLow": storedInt(defaults, key: "overtoneLow", fallback: 8),
       "overtoneHigh": storedInt(defaults, key: "overtoneHigh", fallback: 16),
       "overtoneToneCount": storedInt(defaults, key: "overtoneToneCount", fallback: 4),
@@ -119,17 +124,36 @@ import UIKit
       "extraToneCount": "extraChordToneCount",
       "extraEdo": "extraEdo",
       "freeJiEnabled": "freeJiEnabled",
+      "ratioMcqEdos": "ratioMcqEdos",
+      "ratioMcqJiEnabled": "ratioMcqJiEnabled",
+      "ratioMcqRatios": "ratioMcqRatios",
+      "ratioMcqOptionCount": "ratioMcqOptionCount",
+      "ratioMcqConfigured": "ratioMcqConfigured",
       "overtoneLow": "overtoneLow",
       "overtoneHigh": "overtoneHigh",
       "overtoneToneCount": "overtoneToneCount",
       "instrumentProgram": "instrumentProgram",
       "keyPitchPreviewEnabled": "keyPitchPreviewEnabled",
     ]
+    let stableListKeys: Set<String> = ["ratioMcqEdos", "ratioMcqRatios"]
     for (flutterKey, nativeKey) in mapping {
       if let value = values[flutterKey] {
-        defaults.set(value, forKey: nativeKey)
+        defaults.set(
+          stableListKeys.contains(flutterKey) ? stableListString(value) : value,
+          forKey: nativeKey
+        )
       }
     }
+  }
+
+  private func stableListString(_ value: Any) -> String {
+    if let string = value as? String { return string }
+    guard JSONSerialization.isValidJSONObject(value),
+          let data = try? JSONSerialization.data(withJSONObject: value),
+          let encoded = String(data: data, encoding: .utf8) else {
+      return String(describing: value)
+    }
+    return encoded
   }
 
   private func storedInt(_ defaults: UserDefaults, key: String, fallback: Int) -> Int {

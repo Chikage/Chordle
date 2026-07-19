@@ -5,6 +5,7 @@ import 'models/chordle_mode.dart';
 import 'screens/free_screen.dart';
 import 'screens/game_screen.dart';
 import 'screens/mode_selection_screen.dart';
+import 'screens/ratio_mcq_screen.dart';
 import 'theme.dart';
 
 class ChordleApp extends StatelessWidget {
@@ -35,6 +36,7 @@ class _AppHome extends StatelessWidget {
       ),
       child: ModeSelectionScreen(
         onModeSelected: (mode) => _openGame(context, mode),
+        onRatioMcqSelected: () => _openRatioMcq(context),
         onFreeSelected: () => _openFree(context),
       ),
     );
@@ -46,6 +48,10 @@ class _AppHome extends StatelessWidget {
 
   Future<void> _openFree(BuildContext context) {
     return _openScreen(context, const FreeScreen());
+  }
+
+  Future<void> _openRatioMcq(BuildContext context) {
+    return _openScreen(context, const RatioMcqScreen());
   }
 
   Future<void> _openScreen(BuildContext context, Widget screen) {

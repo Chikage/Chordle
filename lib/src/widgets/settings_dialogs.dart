@@ -49,7 +49,7 @@ Future<ChordleSettings?> showNormalSettingsDialog(
                 () => toneCount = sanitizeChordToneCount(value.round()),
               ),
             ),
-            _ProgramSlider(
+            MidiProgramSlider(
               value: program,
               onChanged: (value) => setState(() => program = value),
             ),
@@ -176,7 +176,7 @@ Future<ChordleSettings?> showExtraSettingsDialog(
                 () => toneCount = sanitizeChordToneCount(value.round()),
               ),
             ),
-          _ProgramSlider(
+          MidiProgramSlider(
             value: program,
             onChanged: (value) => setState(() => program = value),
           ),
@@ -276,7 +276,7 @@ Future<ChordleSettings?> showOvertoneSettingsDialog(
                       ),
                     ),
             ),
-            _ProgramSlider(
+            MidiProgramSlider(
               value: program,
               onChanged: (value) => setState(() => program = value),
             ),
@@ -427,8 +427,12 @@ class _LabeledSlider extends StatelessWidget {
   }
 }
 
-class _ProgramSlider extends StatelessWidget {
-  const _ProgramSlider({required this.value, required this.onChanged});
+class MidiProgramSlider extends StatelessWidget {
+  const MidiProgramSlider({
+    required this.value,
+    required this.onChanged,
+    super.key,
+  });
 
   final int value;
   final ValueChanged<int> onChanged;

@@ -95,12 +95,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('shows all four Chordle modes', (tester) async {
+  testWidgets('shows all five Chordle modes', (tester) async {
     await tester.pumpWidget(const ChordleApp());
 
     expect(find.text('Chordle'), findsOneWidget);
     expect(find.text('Normal'), findsOneWidget);
     expect(find.text('Extra'), findsOneWidget);
+    expect(find.text('MCQ of Ratio'), findsOneWidget);
     expect(find.text('Free'), findsOneWidget);
     expect(find.text('Overtones'), findsOneWidget);
   });
@@ -571,6 +572,7 @@ void main() {
           theme: buildChordleTheme().copyWith(platform: platform),
           home: ModeSelectionScreen(
             onModeSelected: (_) {},
+            onRatioMcqSelected: () {},
             onFreeSelected: () {},
           ),
         ),

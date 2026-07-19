@@ -12,6 +12,7 @@ abstract final class ChordleColors {
   static const iconGray = Color(0xFF46484D);
   static const gray = Color(0xFF86888A);
   static const extraCorrect = Color(0xFF8EB8FF);
+  static const ratioMcq = extraCorrect;
   static const extraNear = Color(0xFFF0A9C8);
   static const selected = Color(0xFFCBB8FF);
   static const error = Color(0xFFE57373);

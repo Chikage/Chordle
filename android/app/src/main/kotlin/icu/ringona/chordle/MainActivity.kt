@@ -12,6 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import org.json.JSONArray
 
 class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -296,6 +297,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun putPreferenceValue(editor: SharedPreferences.Editor, key: String, value: Any?) {
+        if (key in STABLE_LIST_SETTING_KEYS) {
+            when (value) {
+                null -> editor.remove(key)
+                else -> editor.putString(key, stableListPreferenceValue(value))
+            }
+            return
+        }
         when (value) {
             null -> editor.remove(key)
             is Boolean -> editor.putBoolean(key, value)
@@ -310,6 +318,13 @@ class MainActivity : FlutterActivity() {
             is Set<*> -> editor.putStringSet(key, value.mapNotNull(Any?::toString).toSet())
             else -> editor.putString(key, value.toString())
         }
+    }
+
+    private fun stableListPreferenceValue(value: Any): String = when (value) {
+        is String -> value
+        is Iterable<*> -> JSONArray(value.toList()).toString()
+        is Array<*> -> JSONArray(value.toList()).toString()
+        else -> JSONArray(listOf(value)).toString()
     }
 
     private fun channelValue(value: Any?): Any? = when (value) {
@@ -390,6 +405,8 @@ class MainActivity : FlutterActivity() {
         const val DEFAULT_GAIN = 2.25f
         const val DEFAULT_REVERB = 54
 
+        val STABLE_LIST_SETTING_KEYS = setOf("ratioMcqEdos", "ratioMcqRatios")
+
         val SETTING_SPECS = listOf(
             SettingSpec(
                 "normalLow",
@@ -427,6 +444,15 @@ class MainActivity : FlutterActivity() {
                 listOf("free_ji_enabled"),
                 defaultValue = false,
             ),
+            SettingSpec("ratioMcqEdos", emptyList(), defaultValue = "[12]"),
+            SettingSpec("ratioMcqJiEnabled", emptyList(), defaultValue = false),
+            SettingSpec(
+                "ratioMcqRatios",
+                emptyList(),
+                defaultValue = "[\"3/2\",\"4/3\"]",
+            ),
+            SettingSpec("ratioMcqOptionCount", emptyList(), defaultValue = 2),
+            SettingSpec("ratioMcqConfigured", emptyList(), defaultValue = false),
             SettingSpec(
                 "overtoneLow",
                 listOf("overtoneRangeLow", "overtone_range_low"),
