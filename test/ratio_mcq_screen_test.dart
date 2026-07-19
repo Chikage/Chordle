@@ -110,7 +110,7 @@ void main() {
   });
 
   testWidgets('keeps the custom ratio controls compact', (tester) async {
-    await _useSurface(tester, const Size(800, 1000));
+    await _useSurface(tester, const Size(390, 844));
     _mockPlatformChannel(
       _ratioSettings(
         configured: true,
@@ -132,13 +132,19 @@ void main() {
     expect(firstChip.materialTapTargetSize, MaterialTapTargetSize.shrinkWrap);
     expect(
       firstChip.visualDensity,
-      const VisualDensity(horizontal: -3, vertical: -3),
+      const VisualDensity(horizontal: -4, vertical: -4),
     );
-    expect(tester.getSize(firstChipFinder).height, lessThan(40));
+    expect(tester.getSize(firstChipFinder).height, lessThan(36));
     expect(
       tester.getTopLeft(secondChipFinder).dx -
           tester.getTopRight(firstChipFinder).dx,
-      closeTo(5, 0.1),
+      closeTo(4, 0.1),
+    );
+    expect(
+      tester
+          .getTopLeft(find.byKey(const ValueKey<String>('ratio-chip-5/4')))
+          .dy,
+      closeTo(tester.getTopLeft(firstChipFinder).dy, 0.1),
     );
 
     for (final key in <String>[
@@ -146,10 +152,13 @@ void main() {
       'ratio-denominator-field',
     ]) {
       final size = tester.getSize(find.byKey(ValueKey<String>(key)));
-      expect(size.width, lessThan(110));
-      expect(size.height, lessThanOrEqualTo(46));
+      expect(size.width, lessThan(80));
+      expect(size.height, lessThanOrEqualTo(44));
     }
-    expect(tester.getSize(find.widgetWithText(FilledButton, '增加')).width, 82);
+    expect(
+      tester.getSize(find.byKey(const ValueKey<String>('ratio-add-button'))),
+      const Size.square(42),
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -469,8 +478,9 @@ Future<void> _addRatio(
     find.byKey(const ValueKey<String>('ratio-denominator-field')),
     denominator,
   );
-  await tester.ensureVisible(find.text('增加'));
-  await tester.tap(find.text('增加'));
+  final addButton = find.byKey(const ValueKey<String>('ratio-add-button'));
+  await tester.ensureVisible(addButton);
+  await tester.tap(addButton);
   await tester.pump();
 }
 

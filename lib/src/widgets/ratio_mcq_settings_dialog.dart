@@ -233,8 +233,8 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
               ),
               const SizedBox(height: 10),
               Wrap(
-                spacing: 5,
-                runSpacing: 5,
+                spacing: 4,
+                runSpacing: 4,
                 children: [
                   for (final ratio in _ratios)
                     InputChip(
@@ -242,15 +242,15 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
                       label: Text(ratio),
                       labelStyle: const TextStyle(
                         color: ChordleColors.dialogText,
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w800,
                         height: 1,
                       ),
-                      labelPadding: const EdgeInsets.only(left: 6, right: 1),
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      labelPadding: const EdgeInsets.only(left: 4, right: 0),
+                      padding: EdgeInsets.zero,
                       visualDensity: const VisualDensity(
-                        horizontal: -3,
-                        vertical: -3,
+                        horizontal: -4,
+                        vertical: -4,
                       ),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       backgroundColor: Colors.white.withValues(alpha: 0.72),
@@ -259,8 +259,9 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
                           alpha: 0.45,
                         ),
                       ),
-                      deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                      deleteIcon: const Icon(Icons.close_rounded, size: 14),
                       deleteIconColor: ChordleColors.dialogMuted,
+                      deleteButtonTooltipMessage: '删除 $ratio',
                       onDeleted:
                           widget.firstRun || _ratios.length > _minimumRatioCount
                           ? () => _removeRatio(ratio)
@@ -429,7 +430,7 @@ class _RatioComponentField extends StatelessWidget {
       textAlign: TextAlign.center,
       style: const TextStyle(
         color: ChordleColors.dialogText,
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: FontWeight.w700,
       ),
       cursorColor: ChordleColors.dialogText,
@@ -442,13 +443,13 @@ class _RatioComponentField extends StatelessWidget {
         floatingLabelBehavior: FloatingLabelBehavior.never,
         counterText: '',
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 10,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
         filled: true,
         fillColor: Colors.white,
-        labelStyle: const TextStyle(color: ChordleColors.dialogMuted),
+        labelStyle: const TextStyle(
+          color: ChordleColors.dialogMuted,
+          fontSize: 12.5,
+        ),
         floatingLabelStyle: const TextStyle(
           color: ChordleColors.dialogText,
           fontWeight: FontWeight.w800,
@@ -489,7 +490,7 @@ class _RatioEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fields = SizedBox(
-      width: 224,
+      width: 176,
       child: Row(
         children: [
           Expanded(
@@ -499,7 +500,7 @@ class _RatioEditor extends StatelessWidget {
             ),
           ),
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8),
+            padding: EdgeInsets.symmetric(horizontal: 6),
             child: Text(
               '/',
               style: TextStyle(
@@ -518,23 +519,30 @@ class _RatioEditor extends StatelessWidget {
         ],
       ),
     );
-    final addButton = SizedBox(
-      width: 82,
-      height: 46,
-      child: FilledButton(
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+    final addButton = SizedBox.square(
+      dimension: 42,
+      child: IconButton.filled(
+        key: const ValueKey<String>('ratio-add-button'),
+        tooltip: '增加比例',
+        style: IconButton.styleFrom(
+          backgroundColor: ChordleColors.ratioMcq,
+          foregroundColor: const Color(0xFF172033),
+          disabledBackgroundColor: ChordleColors.dialogMuted.withValues(
+            alpha: 0.22,
+          ),
+          disabledForegroundColor: ChordleColors.dialogMuted,
+          padding: EdgeInsets.zero,
         ),
         onPressed: canAdd ? onAdd : null,
-        child: const Text('增加'),
+        icon: const Icon(Icons.add_rounded, size: 24),
       ),
     );
 
     return Align(
       alignment: Alignment.centerLeft,
       child: Wrap(
-        spacing: 10,
-        runSpacing: 8,
+        spacing: 8,
+        runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [fields, addButton],
       ),
