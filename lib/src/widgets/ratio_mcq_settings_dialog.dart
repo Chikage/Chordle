@@ -54,18 +54,21 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
   @override
   void initState() {
     super.initState();
-    _edos = widget.settings.ratioMcqEdos
-        .where((edo) => edo >= _minimumEdo && edo <= _maximumEdo)
-        .toSet();
-    _jiEnabled = widget.settings.ratioMcqJiEnabled;
-    _ratios = _normalizedStoredRatios(widget.settings.ratioMcqRatios);
-    if (_ratios.length < _minimumRatioCount) {
-      _ratios = <String>['3/2', '4/3'];
-    }
-    _optionCount = widget.settings.ratioMcqOptionCount.clamp(
-      _minimumRatioCount,
-      _ratios.length,
-    );
+    _edos = widget.firstRun
+        ? <int>{}
+        : widget.settings.ratioMcqEdos
+              .where((edo) => edo >= _minimumEdo && edo <= _maximumEdo)
+              .toSet();
+    _jiEnabled = widget.firstRun ? false : widget.settings.ratioMcqJiEnabled;
+    _ratios = widget.firstRun
+        ? <String>[]
+        : _normalizedStoredRatios(widget.settings.ratioMcqRatios);
+    _optionCount = _ratios.length < _minimumRatioCount
+        ? _minimumRatioCount
+        : widget.settings.ratioMcqOptionCount.clamp(
+            _minimumRatioCount,
+            _ratios.length,
+          );
     _instrumentProgram = widget.settings.instrumentProgram;
   }
 
@@ -109,13 +112,15 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
   }
 
   void _removeRatio(String ratio) {
-    if (_ratios.length <= _minimumRatioCount) {
+    if (!widget.firstRun && _ratios.length <= _minimumRatioCount) {
       setState(() => _ratioError = '至少保留 $_minimumRatioCount 个比例');
       return;
     }
     setState(() {
       _ratios = _ratios.where((candidate) => candidate != ratio).toList();
-      _optionCount = _optionCount.clamp(_minimumRatioCount, _ratios.length);
+      _optionCount = _ratios.length < _minimumRatioCount
+          ? _minimumRatioCount
+          : _optionCount.clamp(_minimumRatioCount, _ratios.length);
       _ratioError = null;
     });
   }
@@ -234,7 +239,8 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
                   for (final ratio in _ratios)
                     InputChip(
                       label: Text(ratio),
-                      onDeleted: _ratios.length > _minimumRatioCount
+                      onDeleted:
+                          widget.firstRun || _ratios.length > _minimumRatioCount
                           ? () => _removeRatio(ratio)
                           : null,
                     ),
@@ -255,21 +261,27 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
               _SectionTitle(
                 index: 3,
                 title: '设置可选项个数',
-                trailing: '$_optionCount 个',
+                trailing: _ratios.length < _minimumRatioCount
+                    ? '待设置'
+                    : '$_optionCount 个',
               ),
               const SizedBox(height: 6),
-              _DialogHint('可设置为 2–${_ratios.length}，不会超过当前比例总数。'),
-              Slider(
-                value: _optionCount.toDouble(),
-                min: _minimumRatioCount.toDouble(),
-                max: _ratios.length.toDouble(),
-                divisions: _ratios.length > _minimumRatioCount
-                    ? _ratios.length - _minimumRatioCount
-                    : null,
-                label: '$_optionCount',
-                onChanged: (value) =>
-                    setState(() => _optionCount = value.round()),
-              ),
+              if (_ratios.length < _minimumRatioCount)
+                const _DialogHint('请先设置至少 2 个比例。')
+              else ...[
+                _DialogHint('可设置为 2–${_ratios.length}，不会超过当前比例总数。'),
+                Slider(
+                  value: _optionCount.toDouble(),
+                  min: _minimumRatioCount.toDouble(),
+                  max: _ratios.length.toDouble(),
+                  divisions: _ratios.length > _minimumRatioCount
+                      ? _ratios.length - _minimumRatioCount
+                      : null,
+                  label: '$_optionCount',
+                  onChanged: (value) =>
+                      setState(() => _optionCount = value.round()),
+                ),
+              ],
               const SizedBox(height: 22),
               _SectionTitle(
                 index: 4,
@@ -576,8 +588,8 @@ class _TuningSelectorDialogState extends State<_TuningSelectorDialog> {
                   children: [
                     const Expanded(
                       child: Text(
-                        key: ValueKey<String>('ratio-tuning-selector-title'),
                         '选择调律集合',
+                        key: ValueKey<String>('ratio-tuning-selector-title'),
                         style: TextStyle(
                           color: ChordleColors.dialogText,
                           fontSize: 20,

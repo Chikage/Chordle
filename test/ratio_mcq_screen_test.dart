@@ -23,7 +23,24 @@ void main() {
 
     expect(find.text('MCQ of Ratio 设置'), findsOneWidget);
     expect(find.textContaining('首次进入请先完成四项设置'), findsOneWidget);
+    expect(find.text('尚未选择调律'), findsOneWidget);
+    expect(find.byType(InputChip), findsNothing);
+    expect(find.text('待设置'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('requires explicit first-run MCQ selections before saving', (
+    tester,
+  ) async {
+    await _useSurface(tester, const Size(390, 844));
+    _mockPlatformChannel(_ratioSettings(configured: false));
+
+    await _pumpScreen(tester);
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(find.text('MCQ of Ratio 设置'), findsOneWidget);
+    expect(find.text('请至少选择一种 EDO 调律或 JI'), findsOneWidget);
   });
 
   testWidgets('defers the full tuning list until the selector is opened', (
@@ -59,6 +76,7 @@ void main() {
     );
 
     await tester.tap(find.text('常用组合'));
+    await tester.pump();
     await tester.tap(find.text('应用选择'));
     await tester.pumpAndSettle();
 
@@ -108,6 +126,18 @@ void main() {
     await _pumpScreen(tester);
     expect(find.text('MCQ of Ratio 设置'), findsOneWidget);
 
+    await tester.tap(
+      find.byKey(const ValueKey<String>('ratio-tuning-selector-button')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('ratio-tuning-edo-12')));
+    await tester.pump();
+    await tester.tap(find.text('应用选择'));
+    await tester.pumpAndSettle();
+
+    await _addRatio(tester, numerator: '3', denominator: '2');
+    await _addRatio(tester, numerator: '4', denominator: '3');
+
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
 
@@ -140,7 +170,7 @@ void main() {
     );
 
     await _pumpScreen(tester);
-    await tester.tap(find.byTooltip('设置'));
+    await tester.tap(find.byTooltip('游戏设置'));
     await tester.pumpAndSettle();
 
     final programSlider = tester.widget<MidiProgramSlider>(
@@ -276,6 +306,68 @@ void main() {
     expect(bTones.single, groupTones[1]);
   });
 
+  testWidgets('shows option previews only after submit and plays B or A+B', (
+    tester,
+  ) async {
+    await _useSurface(tester, const Size(800, 1000));
+    final playArguments = <Map<Object?, Object?>>[];
+    _mockPlatformChannel(
+      _ratioSettings(
+        configured: true,
+        edos: const <int>[12],
+        ratios: const <String>['9/8', '3/2'],
+      ),
+      onPlayTones: (call) {
+        playArguments.add(
+          Map<Object?, Object?>.from(call.arguments as Map<Object?, Object?>),
+        );
+      },
+    );
+
+    await _pumpScreen(tester);
+    expect(
+      find.byKey(const ValueKey<String>('ratio-option-play-b-0')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('ratio-option-play-chord-0')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('ratio-option-radio-0')),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.text('提交答案'));
+    await tester.tap(find.text('提交答案'));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey<String>('ratio-option-play-b-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('ratio-option-play-chord-0')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('ratio-option-play-b-0')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('ratio-option-play-chord-0')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(playArguments, hasLength(2));
+    final bTones = playArguments[0]['tones'] as List<Object?>;
+    final chordTones = playArguments[1]['tones'] as List<Object?>;
+    expect(bTones, hasLength(1));
+    expect(chordTones, hasLength(2));
+    expect(bTones.single, chordTones[1]);
+  });
+
   testWidgets('lays out the A/B prompt on a 320px-wide screen', (tester) async {
     await _useSurface(tester, const Size(320, 700));
     _mockPlatformChannel(
@@ -291,8 +383,42 @@ void main() {
     expect(find.text('A'), findsOneWidget);
     expect(find.text('B'), findsOneWidget);
     expect(find.text('整组播放'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('ratio-option-checkbox-0')),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.text('提交答案'));
+    await tester.tap(find.text('提交答案'));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey<String>('ratio-option-play-chord-0')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
+}
+
+Future<void> _addRatio(
+  WidgetTester tester, {
+  required String numerator,
+  required String denominator,
+}) async {
+  await tester.ensureVisible(
+    find.byKey(const ValueKey<String>('ratio-numerator-field')),
+  );
+  await tester.enterText(
+    find.byKey(const ValueKey<String>('ratio-numerator-field')),
+    numerator,
+  );
+  await tester.enterText(
+    find.byKey(const ValueKey<String>('ratio-denominator-field')),
+    denominator,
+  );
+  await tester.ensureVisible(find.text('增加'));
+  await tester.tap(find.text('增加'));
+  await tester.pump();
 }
 
 Future<void> _pumpScreen(WidgetTester tester) async {

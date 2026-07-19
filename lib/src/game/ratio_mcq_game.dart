@@ -188,6 +188,31 @@ final class RatioMcqQuestion {
   List<double> get playbackFrequencies =>
       List<double>.unmodifiable(<double>[frequencyAHz, frequencyBHz]);
 
+  double optionBFrequencyHz(int optionIndex) {
+    _checkOptionIndex(optionIndex, options.length);
+    final option = options[optionIndex];
+    if (tuning.isJi) {
+      return frequencyAHz * option.value;
+    }
+
+    final rootStep = edoRootStep;
+    if (rootStep == null) {
+      throw StateError('EDO 题目缺少 A 音 Step');
+    }
+    final intervalSteps = pureEdoStepsForRatio(
+      option.positiveRatio,
+      tuning.edo,
+    );
+    return frequencyForExtraStep(rootStep + intervalSteps, tuning.edo);
+  }
+
+  List<double> optionPlaybackFrequencies(int optionIndex) {
+    return List<double>.unmodifiable(<double>[
+      frequencyAHz,
+      optionBFrequencyHz(optionIndex),
+    ]);
+  }
+
   bool isCorrectOption(int optionIndex) {
     _checkOptionIndex(optionIndex, options.length);
     return correctOptionIndices.contains(optionIndex);

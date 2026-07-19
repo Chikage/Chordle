@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:chordle/src/game/edo_ratio.dart';
 import 'package:chordle/src/game/ji_tuning.dart';
 import 'package:chordle/src/game/ratio_mcq_game.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -141,6 +142,48 @@ void main() {
         closeTo(question.targetRatio.value, 0.000000001),
       );
     });
+
+    test(
+      'builds every option preview from the question A under its tuning',
+      () {
+        for (final tuning in <RatioMcqTuning>[
+          RatioMcqTuning.edo(19),
+          const RatioMcqTuning.ji(),
+        ]) {
+          final question = RatioMcqQuestionGenerator(
+            tunings: <RatioMcqTuning>[tuning],
+            ratios: <RatioMcqRatio>[
+              RatioMcqRatio(5, 4),
+              RatioMcqRatio(4, 3),
+              RatioMcqRatio(3, 2),
+            ],
+            optionCount: 3,
+            random: _ZeroRandom(),
+          ).nextQuestion();
+
+          for (var index = 0; index < question.options.length; index += 1) {
+            final option = question.options[index];
+            final frequencyB = question.optionBFrequencyHz(index);
+            final expected = tuning.isJi
+                ? question.frequencyAHz * option.value
+                : frequencyForExtraStep(
+                    question.edoRootStep! +
+                        pureEdoStepsForRatio(option.positiveRatio, tuning.edo),
+                    tuning.edo,
+                  );
+
+            expect(frequencyB, closeTo(expected, 0.000000001));
+            expect(question.optionPlaybackFrequencies(index), <double>[
+              question.frequencyAHz,
+              frequencyB,
+            ]);
+            if (question.isCorrectOption(index)) {
+              expect(frequencyB, closeTo(question.frequencyBHz, 0.000000001));
+            }
+          }
+        }
+      },
+    );
 
     test('extreme ratios remain playable in 12 EDO, 72 EDO, and JI', () {
       for (final tuning in <RatioMcqTuning>[

@@ -132,6 +132,20 @@ class _RatioMcqScreenState extends State<RatioMcqScreen> {
     );
   }
 
+  Future<void> _playOptionB(int optionIndex) {
+    final question = _session!.question;
+    return _playQuestionTone(question.optionBFrequencyHz(optionIndex));
+  }
+
+  Future<void> _playOptionChord(int optionIndex) {
+    final question = _session!.question;
+    return _audio.playFrequencies(
+      question.optionPlaybackFrequencies(optionIndex),
+      durationMs: 1600,
+      program: _settings.instrumentProgram,
+    );
+  }
+
   void _selectOption(int index) {
     final session = _session!;
     if (session.isSubmitted) return;
@@ -206,6 +220,10 @@ class _RatioMcqScreenState extends State<RatioMcqScreen> {
                               _playQuestionTone(session.question.frequencyBHz),
                             ),
                             onPlay: () => unawaited(_playQuestion()),
+                            onPlayOptionB: (index) =>
+                                unawaited(_playOptionB(index)),
+                            onPlayOptionChord: (index) =>
+                                unawaited(_playOptionChord(index)),
                             onSelectOption: _selectOption,
                             onSubmit: _submit,
                             onNextQuestion: () => unawaited(_nextQuestion()),
@@ -231,6 +249,8 @@ class _QuestionBody extends StatelessWidget {
     required this.onPlayA,
     required this.onPlayB,
     required this.onPlay,
+    required this.onPlayOptionB,
+    required this.onPlayOptionChord,
     required this.onSelectOption,
     required this.onSubmit,
     required this.onNextQuestion,
@@ -241,6 +261,8 @@ class _QuestionBody extends StatelessWidget {
   final VoidCallback onPlayA;
   final VoidCallback onPlayB;
   final VoidCallback onPlay;
+  final ValueChanged<int> onPlayOptionB;
+  final ValueChanged<int> onPlayOptionChord;
   final ValueChanged<int> onSelectOption;
   final VoidCallback onSubmit;
   final VoidCallback onNextQuestion;
@@ -287,6 +309,9 @@ class _QuestionBody extends StatelessWidget {
             selected: session.selectedOptionIndices.contains(index),
             submitted: submitted,
             correct: question.isCorrectOption(index),
+            audioReady: audioReady,
+            onPlayB: () => onPlayOptionB(index),
+            onPlayChord: () => onPlayOptionChord(index),
             onPressed: () => onSelectOption(index),
           ),
           if (index != question.options.length - 1) const SizedBox(height: 9),
@@ -479,6 +504,9 @@ class _RatioOptionTile extends StatelessWidget {
     required this.selected,
     required this.submitted,
     required this.correct,
+    required this.audioReady,
+    required this.onPlayB,
+    required this.onPlayChord,
     required this.onPressed,
   });
 
@@ -488,6 +516,9 @@ class _RatioOptionTile extends StatelessWidget {
   final bool selected;
   final bool submitted;
   final bool correct;
+  final bool audioReady;
+  final VoidCallback onPlayB;
+  final VoidCallback onPlayChord;
   final VoidCallback onPressed;
 
   @override
@@ -560,7 +591,25 @@ class _RatioOptionTile extends StatelessWidget {
                   ),
                 ),
               ),
-              if (submitted)
+              if (submitted) ...[
+                _OptionPlaybackButton(
+                  key: ValueKey<String>('ratio-option-play-b-$index'),
+                  label: 'B',
+                  tooltip: '播放 $label 对应的 B 音',
+                  icon: Icons.music_note_rounded,
+                  enabled: audioReady,
+                  onPressed: onPlayB,
+                ),
+                const SizedBox(width: 4),
+                _OptionPlaybackButton(
+                  key: ValueKey<String>('ratio-option-play-chord-$index'),
+                  label: 'A+B',
+                  tooltip: '播放 $label 对应的 A+B 和弦',
+                  icon: Icons.queue_music_rounded,
+                  enabled: audioReady,
+                  onPressed: onPlayChord,
+                ),
+                const SizedBox(width: 6),
                 Icon(
                   correct
                       ? Icons.check_circle_rounded
@@ -573,9 +622,51 @@ class _RatioOptionTile extends StatelessWidget {
                       ? ChordleColors.error
                       : ChordleColors.muted,
                 ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _OptionPlaybackButton extends StatelessWidget {
+  const _OptionPlaybackButton({
+    required this.label,
+    required this.tooltip,
+    required this.icon,
+    required this.enabled,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String label;
+  final String tooltip;
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: ChordleColors.text,
+          disabledForegroundColor: ChordleColors.muted,
+          minimumSize: const Size(0, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          side: BorderSide(
+            color: enabled
+                ? ChordleColors.ratioMcq.withValues(alpha: 0.75)
+                : ChordleColors.border,
+          ),
+          visualDensity: VisualDensity.compact,
+        ),
+        onPressed: enabled ? onPressed : null,
+        icon: Icon(icon, size: 17),
+        label: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
       ),
     );
   }
