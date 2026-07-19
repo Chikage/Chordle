@@ -756,9 +756,10 @@ class _RatioMcqStatusBar extends StatelessWidget {
               ),
             ),
           ),
-          Flexible(
+          Expanded(
             child: Text(
               audioText,
+              textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -768,7 +769,6 @@ class _RatioMcqStatusBar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 14),
           Expanded(
             child: Text(
               '得分 $scoreLabel',

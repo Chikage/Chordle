@@ -94,6 +94,56 @@ void main() {
   });
 
   group('question generation', () {
+    test('MCQ root weighting centers the whole pair around middle C', () {
+      final centered = ratioMcqRootCandidateWeight(
+        rootMidi: 56,
+        targetMidi: 64,
+      );
+      final equallyLow = ratioMcqRootCandidateWeight(
+        rootMidi: 40,
+        targetMidi: 50,
+      );
+      final equallyHigh = ratioMcqRootCandidateWeight(
+        rootMidi: 70,
+        targetMidi: 80,
+      );
+      final edge = ratioMcqRootCandidateWeight(rootMidi: 21, targetMidi: 21);
+
+      expect(centered, closeTo(1, 0.000000001));
+      expect(equallyLow, closeTo(equallyHigh, 0.000000001));
+      expect(centered, greaterThan(equallyLow));
+      expect(edge, greaterThanOrEqualTo(ratioMcqEdgeWeightFloor));
+    });
+
+    test('generated EDO and JI pairs favor the C3-C5 middle register', () {
+      for (final tuning in <RatioMcqTuning>[
+        RatioMcqTuning.edo(12),
+        const RatioMcqTuning.ji(),
+      ]) {
+        final generator = RatioMcqQuestionGenerator(
+          tunings: <RatioMcqTuning>[tuning],
+          ratios: <RatioMcqRatio>[RatioMcqRatio(3, 2), RatioMcqRatio(4, 3)],
+          optionCount: 2,
+          random: math.Random(20260720),
+        );
+        var middleRegisterCount = 0;
+        const drawCount = 1200;
+
+        for (var index = 0; index < drawCount; index += 1) {
+          final question = generator.nextQuestion();
+          final pairCenterMidi =
+              (midiValueForFrequency(question.frequencyAHz) +
+                  midiValueForFrequency(question.frequencyBHz)) /
+              2.0;
+          if (pairCenterMidi >= 48 && pairCenterMidi <= 72) {
+            middleRegisterCount += 1;
+          }
+        }
+
+        expect(middleRegisterCount, greaterThan(drawCount ~/ 2));
+      }
+    });
+
     test(
       'always includes the target and counts all equal EDO steps as correct',
       () {

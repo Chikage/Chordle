@@ -80,7 +80,7 @@ void main() {
     await tester.tap(find.text('应用选择'));
     await tester.pumpAndSettle();
 
-    expect(find.text('12、19、24、31、53 EDO + JI'), findsOneWidget);
+    expect(find.text('12、19、22、24、26、31、53、65、72 EDO + JI'), findsOneWidget);
   });
 
   testWidgets('uses visible dark text on the ratio input fields', (
@@ -106,6 +106,50 @@ void main() {
       '31',
     );
     expect(find.text('31'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('keeps the custom ratio controls compact', (tester) async {
+    await _useSurface(tester, const Size(800, 1000));
+    _mockPlatformChannel(
+      _ratioSettings(
+        configured: true,
+        ratios: const <String>['3/2', '4/3', '5/4', '6/5'],
+      ),
+    );
+
+    await _pumpScreen(tester);
+    await tester.tap(find.byTooltip('游戏设置'));
+    await tester.pumpAndSettle();
+
+    final firstChipFinder = find.byKey(
+      const ValueKey<String>('ratio-chip-3/2'),
+    );
+    final secondChipFinder = find.byKey(
+      const ValueKey<String>('ratio-chip-4/3'),
+    );
+    final firstChip = tester.widget<InputChip>(firstChipFinder);
+    expect(firstChip.materialTapTargetSize, MaterialTapTargetSize.shrinkWrap);
+    expect(
+      firstChip.visualDensity,
+      const VisualDensity(horizontal: -3, vertical: -3),
+    );
+    expect(tester.getSize(firstChipFinder).height, lessThan(40));
+    expect(
+      tester.getTopLeft(secondChipFinder).dx -
+          tester.getTopRight(firstChipFinder).dx,
+      closeTo(5, 0.1),
+    );
+
+    for (final key in <String>[
+      'ratio-numerator-field',
+      'ratio-denominator-field',
+    ]) {
+      final size = tester.getSize(find.byKey(ValueKey<String>(key)));
+      expect(size.width, lessThan(110));
+      expect(size.height, lessThanOrEqualTo(46));
+    }
+    expect(tester.getSize(find.widgetWithText(FilledButton, '增加')).width, 82);
     expect(tester.takeException(), isNull);
   });
 
@@ -205,6 +249,15 @@ void main() {
 
     expect(find.text('本题调律：12 EDO'), findsOneWidget);
     expect(find.byType(Checkbox), findsNWidgets(2));
+    expect(tester.widget<Text>(find.text('音频就绪')).textAlign, TextAlign.center);
+    expect(
+      tester.getCenter(find.text('音频就绪')).dx,
+      closeTo(tester.getCenter(find.byType(Scaffold)).dx, 0.1),
+    );
+    expect(
+      tester.getTopRight(find.text('得分 0/0')).dx,
+      closeTo(tester.getTopRight(find.byIcon(Icons.settings_rounded)).dx, 1),
+    );
 
     await tester.tap(find.text('9/8'));
     await tester.pump();

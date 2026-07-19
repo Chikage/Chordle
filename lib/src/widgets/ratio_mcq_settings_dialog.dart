@@ -233,12 +233,34 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
               ),
               const SizedBox(height: 10),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 5,
+                runSpacing: 5,
                 children: [
                   for (final ratio in _ratios)
                     InputChip(
+                      key: ValueKey<String>('ratio-chip-$ratio'),
                       label: Text(ratio),
+                      labelStyle: const TextStyle(
+                        color: ChordleColors.dialogText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                      ),
+                      labelPadding: const EdgeInsets.only(left: 6, right: 1),
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      visualDensity: const VisualDensity(
+                        horizontal: -3,
+                        vertical: -3,
+                      ),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      backgroundColor: Colors.white.withValues(alpha: 0.72),
+                      side: BorderSide(
+                        color: ChordleColors.dialogMuted.withValues(
+                          alpha: 0.45,
+                        ),
+                      ),
+                      deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                      deleteIconColor: ChordleColors.dialogMuted,
                       onDeleted:
                           widget.firstRun || _ratios.length > _minimumRatioCount
                           ? () => _removeRatio(ratio)
@@ -404,8 +426,10 @@ class _RatioComponentField extends StatelessWidget {
       controller: controller,
       keyboardType: TextInputType.number,
       keyboardAppearance: Brightness.light,
+      textAlign: TextAlign.center,
       style: const TextStyle(
         color: ChordleColors.dialogText,
+        fontSize: 16,
         fontWeight: FontWeight.w700,
       ),
       cursorColor: ChordleColors.dialogText,
@@ -415,7 +439,13 @@ class _RatioComponentField extends StatelessWidget {
       ],
       decoration: InputDecoration(
         labelText: label,
+        floatingLabelBehavior: FloatingLabelBehavior.never,
         counterText: '',
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 10,
+        ),
         filled: true,
         fillColor: Colors.white,
         labelStyle: const TextStyle(color: ChordleColors.dialogMuted),
@@ -458,40 +488,56 @@ class _RatioEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _RatioComponentField(
-                controller: numeratorController,
-                label: '分子 a',
+    final fields = SizedBox(
+      width: 224,
+      child: Row(
+        children: [
+          Expanded(
+            child: _RatioComponentField(
+              controller: numeratorController,
+              label: '分子 a',
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              '/',
+              style: TextStyle(
+                color: ChordleColors.dialogText,
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(10, 14, 10, 0),
-              child: Text(
-                '/',
-                style: TextStyle(color: ChordleColors.dialogText, fontSize: 26),
-              ),
+          ),
+          Expanded(
+            child: _RatioComponentField(
+              controller: denominatorController,
+              label: '分母 b',
             ),
-            Expanded(
-              child: _RatioComponentField(
-                controller: denominatorController,
-                label: '分母 b',
-              ),
-            ),
-          ],
+          ),
+        ],
+      ),
+    );
+    final addButton = SizedBox(
+      width: 82,
+      height: 46,
+      child: FilledButton(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
         ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: canAdd ? onAdd : null,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('增加'),
-        ),
-      ],
+        onPressed: canAdd ? onAdd : null,
+        child: const Text('增加'),
+      ),
+    );
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [fields, addButton],
+      ),
     );
   }
 }
@@ -518,7 +564,7 @@ class _TuningSelectorDialog extends StatefulWidget {
 }
 
 class _TuningSelectorDialogState extends State<_TuningSelectorDialog> {
-  static const Set<int> _commonEdos = <int>{12, 19, 24, 31, 53};
+  static const Set<int> _commonEdos = <int>{12, 19, 22, 24, 26, 31, 53, 65, 72};
   final ScrollController _scrollController = ScrollController();
 
   late Set<int> _edos;
@@ -734,7 +780,7 @@ String _tuningSummary(Set<int> edos, bool jiEnabled) {
   }
   if (sorted.isEmpty) return jiEnabled ? '仅 JI（纯律）' : '尚未选择调律';
   final jiSuffix = jiEnabled ? ' + JI' : '';
-  if (sorted.length <= 6) {
+  if (sorted.length <= 10) {
     return '${sorted.join('、')} EDO$jiSuffix';
   }
   return '已选 ${sorted.length} 个 EDO（范围 ${sorted.first}–${sorted.last}）$jiSuffix';

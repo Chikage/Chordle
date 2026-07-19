@@ -12,6 +12,9 @@ const int minRatioMcqRatioCount = 2;
 const int maxRatioMcqRatioCount = 10;
 const int minRatioMcqOptionCount = 2;
 const int maxRatioMcqOptionCount = 10;
+const double ratioMcqPreferredCenterMidi = 60.0;
+const double ratioMcqCenterSpreadSemitones = 14.0;
+const double ratioMcqEdgeWeightFloor = 0.08;
 
 /// A positive rational option whose original numerator and denominator must
 /// both fit the MCQ editor's 1–31 range.
@@ -155,6 +158,23 @@ List<RatioMcqTuning> deduplicateRatioMcqTunings(
   return List<RatioMcqTuning>.unmodifiable(tunings.toSet());
 }
 
+/// Weights an MCQ root by the midpoint of its two sounding pitches.
+///
+/// The Gaussian center keeps the pair around middle C while the floor leaves
+/// a small but nonzero chance for questions in the edge registers. This is
+/// intentionally separate from the low-register bias used by Overtones.
+double ratioMcqRootCandidateWeight({
+  required double rootMidi,
+  required double targetMidi,
+}) {
+  final pairCenterMidi = (rootMidi + targetMidi) / 2.0;
+  final normalizedDistance =
+      (pairCenterMidi - ratioMcqPreferredCenterMidi) /
+      ratioMcqCenterSpreadSemitones;
+  final gaussian = math.exp(-0.5 * normalizedDistance * normalizedDistance);
+  return ratioMcqEdgeWeightFloor + (1.0 - ratioMcqEdgeWeightFloor) * gaussian;
+}
+
 /// An immutable generated A/B ratio question.
 final class RatioMcqQuestion {
   const RatioMcqQuestion._({
@@ -278,9 +298,10 @@ final class RatioMcqQuestionGenerator {
     int? jiRootMidiNote;
 
     if (tuning.isJi) {
-      jiRootMidiNote = randomJiBaseMidiNote(<PositiveRatio>[
-        targetRatio.positiveRatio,
-      ], random: _random);
+      jiRootMidiNote = _randomRatioMcqJiRootMidiNote(
+        targetRatio,
+        random: _random,
+      );
       if (jiRootMidiNote == null) {
         throw StateError('比例 ${targetRatio.label} 无法在 A0–C8 内生成 JI 题目');
       }
@@ -289,10 +310,9 @@ final class RatioMcqQuestionGenerator {
     } else {
       final edo = tuning.edo;
       edoIntervalSteps = pureEdoStepsForRatio(targetRatio.positiveRatio, edo);
-      final playableSteps = edoStepRangeForMidiRange(edo, fullPianoRange);
-      edoRootStep = randomEdoBaseStep(
-        <int>[edoIntervalSteps],
-        playableSteps,
+      edoRootStep = _randomRatioMcqEdoRootStep(
+        intervalSteps: edoIntervalSteps,
+        edo: edo,
         random: _random,
       );
       if (edoRootStep == null) {
@@ -352,6 +372,72 @@ final class RatioMcqQuestionGenerator {
     return pureEdoStepsForRatio(option.positiveRatio, tuning.edo) ==
         edoIntervalSteps;
   }
+}
+
+int? _randomRatioMcqJiRootMidiNote(
+  RatioMcqRatio ratio, {
+  required math.Random random,
+}) {
+  final candidates = <int>[
+    for (final midiNote in fullPianoRange.values)
+      if (isPlayableJiFrequency(
+        frequencyForMidiValue(midiNote.toDouble()) * ratio.value,
+      ))
+        midiNote,
+  ];
+  final intervalSemitones = 12.0 * math.log(ratio.value) / math.ln2;
+  return _randomRatioMcqCandidate(
+    candidates,
+    random: random,
+    weightFor: (midiNote) => ratioMcqRootCandidateWeight(
+      rootMidi: midiNote.toDouble(),
+      targetMidi: midiNote.toDouble() + intervalSemitones,
+    ),
+  );
+}
+
+int? _randomRatioMcqEdoRootStep({
+  required int intervalSteps,
+  required int edo,
+  required math.Random random,
+}) {
+  final playableSteps = edoStepRangeForMidiRange(edo, fullPianoRange);
+  final minimumOffset = math.min(0, intervalSteps);
+  final maximumOffset = math.max(0, intervalSteps);
+  final first = playableSteps.lowerBound - minimumOffset;
+  final last = playableSteps.upperBound - maximumOffset;
+  if (last < first) return null;
+
+  final candidates = <int>[
+    for (var step = first; step <= last; step += 1) step,
+  ];
+  return _randomRatioMcqCandidate(
+    candidates,
+    random: random,
+    weightFor: (rootStep) => ratioMcqRootCandidateWeight(
+      rootMidi: midiValueForExtraStep(rootStep, edo),
+      targetMidi: midiValueForExtraStep(rootStep + intervalSteps, edo),
+    ),
+  );
+}
+
+T? _randomRatioMcqCandidate<T>(
+  List<T> candidates, {
+  required math.Random random,
+  required double Function(T candidate) weightFor,
+}) {
+  if (candidates.isEmpty) return null;
+
+  final weights = <double>[
+    for (final candidate in candidates) weightFor(candidate),
+  ];
+  final totalWeight = weights.fold<double>(0.0, (sum, weight) => sum + weight);
+  var ticket = random.nextDouble() * totalWeight;
+  for (var index = 0; index < candidates.length; index += 1) {
+    ticket -= weights[index];
+    if (ticket < 0) return candidates[index];
+  }
+  return candidates.last;
 }
 
 final class RatioMcqSubmission {
