@@ -694,6 +694,13 @@ final class ChordleGame {
     );
   }
 
+  bool submitOvertoneGuess() {
+    return _submitGuessWithResult(
+      itemName: '数字',
+      resultForGuess: (guess) => evaluateOvertoneGuess(guess, _puzzle.notes),
+    );
+  }
+
   bool _submitGuessWithResult({
     required String itemName,
     required List<TileState> Function(List<int> guess) resultForGuess,
@@ -902,6 +909,47 @@ List<TileState> evaluateGuess(List<int> guess, List<int> answer) {
     }
   }
   return result;
+}
+
+List<TileState> evaluateOvertoneGuess(List<int> guess, List<int> answer) {
+  final reducedGuess = _reduceRatioValues(guess);
+  final reducedAnswer = _reduceRatioValues(answer);
+  if (_sameValues(reducedGuess, reducedAnswer)) {
+    return List<TileState>.filled(guess.length, TileState.correct);
+  }
+
+  final result = evaluateGuess(guess, answer);
+  final reducedResult = evaluateGuess(reducedGuess, reducedAnswer);
+  for (var index = 0; index < result.length; index += 1) {
+    if (result[index] == TileState.absent &&
+        reducedResult[index] != TileState.absent) {
+      result[index] = TileState.present;
+    }
+  }
+  return result;
+}
+
+List<int> _reduceRatioValues(List<int> values) {
+  var divisor = 0;
+  for (final value in values) {
+    divisor = divisor.gcd(value.abs());
+  }
+  if (divisor <= 1) {
+    return List<int>.of(values);
+  }
+  return <int>[for (final value in values) value ~/ divisor];
+}
+
+bool _sameValues(List<int> first, List<int> second) {
+  if (first.length != second.length) {
+    return false;
+  }
+  for (var index = 0; index < first.length; index += 1) {
+    if (first[index] != second[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 List<TileState> evaluateExtraGuess(List<int> guess, List<int> answer, int edo) {

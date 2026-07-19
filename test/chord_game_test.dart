@@ -52,6 +52,77 @@ void main() {
         TileState.correct,
       ]);
     });
+
+    test('accepts equivalent reduced overtone ratios', () {
+      for (final guess in <List<int>>[
+        <int>[12, 15],
+        <int>[4, 5],
+        <int>[16, 20],
+      ]) {
+        expect(evaluateOvertoneGuess(guess, <int>[8, 10]), <TileState>[
+          TileState.correct,
+          TileState.correct,
+        ]);
+      }
+    });
+
+    test('accepts equivalent reduced overtone ratios with three values', () {
+      final cases = <(List<int>, List<List<int>>)>[
+        (
+          <int>[8, 12, 14],
+          <List<int>>[
+            <int>[4, 6, 7],
+            <int>[12, 18, 21],
+            <int>[16, 24, 28],
+          ],
+        ),
+        (
+          <int>[9, 12, 15],
+          <List<int>>[
+            <int>[3, 4, 5],
+            <int>[6, 8, 10],
+            <int>[12, 16, 20],
+          ],
+        ),
+      ];
+
+      for (final (answer, guesses) in cases) {
+        for (final guess in guesses) {
+          expect(
+            evaluateOvertoneGuess(guess, answer),
+            List<TileState>.filled(3, TileState.correct),
+          );
+        }
+      }
+    });
+
+    test('marks reordered reduced overtone ratio values yellow', () {
+      expect(evaluateOvertoneGuess(<int>[15, 12], <int>[8, 10]), <TileState>[
+        TileState.present,
+        TileState.present,
+      ]);
+    });
+
+    test('marks a partial reduced-ratio value yellow instead of green', () {
+      expect(evaluateOvertoneGuess(<int>[4, 7], <int>[8, 10]), <TileState>[
+        TileState.present,
+        TileState.absent,
+      ]);
+    });
+
+    test('marks reordered three-value reduced ratios yellow', () {
+      expect(
+        evaluateOvertoneGuess(<int>[18, 21, 12], <int>[8, 12, 14]),
+        <TileState>[TileState.present, TileState.present, TileState.present],
+      );
+    });
+
+    test('marks partial three-value reduced-ratio matches yellow', () {
+      expect(
+        evaluateOvertoneGuess(<int>[6, 10, 14], <int>[9, 12, 15]),
+        <TileState>[TileState.present, TileState.present, TileState.absent],
+      );
+    });
   });
 
   group('game input and lifecycle', () {
@@ -105,6 +176,29 @@ void main() {
 
       expect(game.submitGuess(itemName: '数字'), isFalse);
       expect(game.message, '请先确认全部 2 个数字');
+    });
+
+    test('overtone mode wins with an equivalent reduced ratio', () {
+      final game = _game(<int>[8, 10]);
+      _enter(game, <int>[12, 15]);
+
+      game.submitOvertoneGuess();
+
+      expect(game.status, GameStatus.won);
+      expect(_rowStates(game, 0), <TileState>[
+        TileState.correct,
+        TileState.correct,
+      ]);
+    });
+
+    test('overtone mode wins with an equivalent three-value ratio', () {
+      final game = _game(<int>[8, 12, 14]);
+      _enter(game, <int>[12, 18, 21]);
+
+      game.submitOvertoneGuess();
+
+      expect(game.status, GameStatus.won);
+      expect(_rowStates(game, 0), List<TileState>.filled(3, TileState.correct));
     });
 
     test('wins only after an all-green row', () {

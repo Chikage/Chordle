@@ -18,14 +18,23 @@ Future<void> showChordleHelpDialog(BuildContext context, ChordleMode mode) {
               if (mode == ChordleMode.overtones) ...[
                 const Text('每局会随机选择一个基音，并从设置的整数区间生成倍频数组。'),
                 const SizedBox(height: 8),
-                const Text('可按任意顺序输入倍频数，提交后按从小到大的答案位置验证。'),
+                const Text(
+                  '可按任意顺序输入倍频数，提交后按从小到大的答案位置验证。'
+                  '整组数字约分后比例相同也算正确，且适用于两个或多个数字。'
+                  '例如 8:10 与 4:5、12:15 等价，8:12:14 与 4:6:7、12:18:21 等价。',
+                ),
               ] else ...[
                 const Text('会按设置随机播放 1–10 个音，1 为单音测试。'),
                 const SizedBox(height: 8),
                 const Text('可按任意顺序输入音符，提交后按从低到高的答案位置验证。'),
               ],
               const SizedBox(height: 14),
-              const _RuleRow(color: ChordleColors.green, text: '绿色：音高和位置都完全正确'),
+              _RuleRow(
+                color: ChordleColors.green,
+                text: mode == ChordleMode.overtones
+                    ? '绿色：数字和位置完全正确，或整组为等价比例'
+                    : '绿色：音高和位置都完全正确',
+              ),
               if (mode == ChordleMode.extra) ...[
                 const _RuleRow(
                   color: ChordleColors.extraCorrect,
@@ -49,11 +58,18 @@ Future<void> showChordleHelpDialog(BuildContext context, ChordleMode mode) {
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
               ] else ...[
-                const _RuleRow(
+                _RuleRow(
                   color: ChordleColors.yellow,
-                  text: '黄色：有这个音，但位置不对',
+                  text: mode == ChordleMode.overtones
+                      ? '黄色：原比例或约分比例中有这个数字'
+                      : '黄色：有这个音，但位置不对',
                 ),
-                const _RuleRow(color: ChordleColors.gray, text: '灰色：和弦里没有这个音'),
+                _RuleRow(
+                  color: ChordleColors.gray,
+                  text: mode == ChordleMode.overtones
+                      ? '灰色：原比例和约分比例中都没有这个数字'
+                      : '灰色：和弦里没有这个音',
+                ),
               ],
               const SizedBox(height: 12),
               const Text(

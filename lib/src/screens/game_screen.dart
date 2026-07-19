@@ -177,12 +177,13 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _submit() {
-    if (widget.mode == ChordleMode.extra) {
-      _game.submitExtraGuess(_extraEdo);
-    } else {
-      _game.submitGuess(
-        itemName: widget.mode == ChordleMode.overtones ? '数字' : '音',
-      );
+    switch (widget.mode) {
+      case ChordleMode.normal:
+        _game.submitGuess();
+      case ChordleMode.extra:
+        _game.submitExtraGuess(_extraEdo);
+      case ChordleMode.overtones:
+        _game.submitOvertoneGuess();
     }
   }
 
