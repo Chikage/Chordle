@@ -10,7 +10,7 @@ const int _minimumEdo = 12;
 const int _maximumEdo = 72;
 const int _minimumRatioCount = 2;
 const int _maximumRatioCount = 10;
-const int _maximumRatioComponent = 31;
+const int _maximumRatioComponent = 127;
 
 Future<ChordleSettings?> showRatioMcqSettingsDialog(
   BuildContext context,
@@ -90,7 +90,7 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
         numerator > _maximumRatioComponent ||
         denominator < 1 ||
         denominator > _maximumRatioComponent) {
-      setState(() => _ratioError = '分子和分母都必须是 1–31 的整数');
+      setState(() => _ratioError = '分子和分母都必须是 1–127 的整数');
       return;
     }
     final normalized = parsePositiveRatio('$numerator/$denominator').label;
@@ -229,7 +229,7 @@ class _RatioMcqSettingsDialogState extends State<_RatioMcqSettingsDialog> {
               ),
               const SizedBox(height: 6),
               const _DialogHint(
-                '分子 a 与分母 b 都必须是小于 32 的正整数；约分后相同的比例不能重复。至少 2 个，最多 10 个。',
+                '分子 a 与分母 b 都必须是 1–127 的整数；约分后相同的比例不能重复。至少 2 个，最多 10 个。',
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -436,7 +436,7 @@ class _RatioComponentField extends StatelessWidget {
       cursorColor: ChordleColors.dialogText,
       inputFormatters: <TextInputFormatter>[
         FilteringTextInputFormatter.digitsOnly,
-        LengthLimitingTextInputFormatter(2),
+        LengthLimitingTextInputFormatter(3),
       ],
       decoration: InputDecoration(
         labelText: label,
@@ -462,7 +462,7 @@ class _RatioComponentField extends StatelessWidget {
         ),
         border: const OutlineInputBorder(),
       ),
-      maxLength: 2,
+      maxLength: 3,
       onSubmitted: (_) => _submitFromField(context),
     );
   }

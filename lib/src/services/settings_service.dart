@@ -6,7 +6,7 @@ const List<int> _defaultRatioMcqEdos = <int>[12];
 const List<String> _defaultRatioMcqRatios = <String>['3/2', '4/3'];
 const int _minRatioMcqEdo = 12;
 const int _maxRatioMcqEdo = 72;
-const int _maxRatioMcqComponent = 31;
+const int _maxRatioMcqComponent = 127;
 const int _minRatioMcqRatioCount = 2;
 const int _maxRatioMcqRatioCount = 10;
 

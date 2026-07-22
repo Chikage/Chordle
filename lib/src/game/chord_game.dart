@@ -69,10 +69,19 @@ const int minMidiProgramNumber = 0;
 const int maxMidiProgramNumber = 127;
 const int defaultMidiProgramNumber = 0;
 const int minOvertoneMultiplier = 1;
-const int maxOvertoneMultiplier = 31;
+const int maxOvertoneMultiplier = 99;
 const int minOvertoneToneCount = 2;
 const int maxOvertoneToneCountLimit = 10;
 const int defaultOvertoneToneCount = 4;
+const IntRange preferredChordMidiRange = IntRange(48, 84);
+const IntRange extendedChordMidiRange = IntRange(36, 96);
+const double preferredChordCenterMidi = 66.0;
+const double chordCenterSpreadSemitones = 18.0;
+const double chordEdgeWeightFloor = 0.02;
+const double preferredChordRegisterWeight = 0.9;
+const double extendedChordRegisterWeight = 0.095;
+const double outsideChordRegisterWeight = 0.005;
+const double chordOutsideDecaySemitones = 6.0;
 const IntRange defaultPlayableRange = IntRange(48, 72);
 const IntRange defaultExtraPlayableRange = IntRange(48, 72);
 const IntRange fullPianoRange = IntRange(
@@ -333,14 +342,14 @@ final class ChordPuzzle {
     final overtoneRange = sanitizeOvertoneRange(multiplierRange);
     final count = sanitizeOvertoneToneCount(toneCount, overtoneRange);
     final rng = random ?? math.Random();
-    final multipliers = _randomSortedValues(overtoneRange, count, rng);
-    final baseMidiNote = randomOvertoneBaseMidiNote(overtoneRange, random: rng);
+    final ratioValues = _randomSortedValues(overtoneRange, count, rng);
+    final baseMidiNote = randomOvertoneBaseMidiNote(ratioValues, random: rng);
     return ChordPuzzle(
-      notes: multipliers,
+      notes: ratioValues,
       label:
-          '${noteLabel(baseMidiNote)} · '
-          '${overtoneRange.lowerBound}-${overtoneRange.upperBound}x',
-      answerLabel: multipliers.join('  '),
+          '${noteLabel(baseMidiNote)} · JI · '
+          '${overtoneRange.lowerBound}:${overtoneRange.upperBound}',
+      answerLabel: ratioValues.join('  '),
       baseMidiNote: baseMidiNote,
     );
   }
@@ -1094,22 +1103,15 @@ int sanitizeMidiProgramNumber(int program) {
 IntRange sanitizeOvertoneRange(IntRange range) {
   var low = range.lowerBound.clamp(
     minOvertoneMultiplier,
-    maxOvertoneMultiplier ~/ 2,
+    maxOvertoneMultiplier - 1,
   );
   var high = range.upperBound.clamp(
     minOvertoneMultiplier,
     maxOvertoneMultiplier,
   );
-  final requiredHigh = math.max(low * 2, low + minOvertoneToneCount);
-  if (high < requiredHigh) {
-    high = requiredHigh;
-  }
-  if (high > maxOvertoneMultiplier) {
-    high = maxOvertoneMultiplier;
-    low = math.max(
-      minOvertoneMultiplier,
-      math.min(low, math.min(high ~/ 2, high - minOvertoneToneCount)),
-    );
+  if (high <= low) {
+    high = math.min(maxOvertoneMultiplier, low + 1);
+    low = math.max(minOvertoneMultiplier, high - 1);
   }
   return IntRange(low, high);
 }
@@ -1118,10 +1120,7 @@ int maxOvertoneToneCount(IntRange multiplierRange) {
   final sanitized = sanitizeOvertoneRange(multiplierRange);
   return math.max(
     minOvertoneToneCount,
-    math.min(
-      maxOvertoneToneCountLimit,
-      sanitized.upperBound - sanitized.lowerBound,
-    ),
+    math.min(maxOvertoneToneCountLimit, sanitized.count),
   );
 }
 
@@ -1185,36 +1184,153 @@ String extraRangeLabel(int edo, IntRange noteRange) {
       '${extraStepLabel(stepRange.upperBound, normalizedEdo)}';
 }
 
+double centeredChordRootCandidateWeight({
+  required double lowestMidi,
+  required double highestMidi,
+}) {
+  final normalizedLowestMidi = math.min(lowestMidi, highestMidi);
+  final normalizedHighestMidi = math.max(lowestMidi, highestMidi);
+  final chordCenterMidi = (normalizedLowestMidi + normalizedHighestMidi) / 2.0;
+  final normalizedDistance =
+      (chordCenterMidi - preferredChordCenterMidi) / chordCenterSpreadSemitones;
+  final gaussian = math.exp(-0.5 * normalizedDistance * normalizedDistance);
+  final outsideDistance =
+      math.max(extendedChordMidiRange.lowerBound - normalizedLowestMidi, 0.0) +
+      math.max(normalizedHighestMidi - extendedChordMidiRange.upperBound, 0.0);
+  final outsidePenalty = math.exp(
+    -outsideDistance / chordOutsideDecaySemitones,
+  );
+  return (chordEdgeWeightFloor + (1.0 - chordEdgeWeightFloor) * gaussian) *
+      outsidePenalty;
+}
+
+double chordRegisterWeight({
+  required double lowestMidi,
+  required double highestMidi,
+}) {
+  final normalizedLowestMidi = math.min(lowestMidi, highestMidi);
+  final normalizedHighestMidi = math.max(lowestMidi, highestMidi);
+  if (normalizedLowestMidi >= preferredChordMidiRange.lowerBound &&
+      normalizedHighestMidi <= preferredChordMidiRange.upperBound) {
+    return preferredChordRegisterWeight;
+  }
+  if (normalizedLowestMidi >= extendedChordMidiRange.lowerBound &&
+      normalizedHighestMidi <= extendedChordMidiRange.upperBound) {
+    return extendedChordRegisterWeight;
+  }
+  return outsideChordRegisterWeight;
+}
+
+/// Selects a root while keeping each register band's total probability stable.
+///
+/// Normalizing within a band prevents its number of candidates from diluting
+/// the preference for complete chords in C3-C6.
+T? randomChordRootCandidate<T>(
+  Iterable<T> candidates, {
+  required math.Random random,
+  required ({double lowestMidi, double highestMidi}) Function(T candidate)
+  boundsFor,
+}) {
+  final entries =
+      <({T candidate, double centerWeight, double registerWeight})>[];
+  final centerWeightByRegister = <double, double>{};
+  for (final candidate in candidates) {
+    final bounds = boundsFor(candidate);
+    final centerWeight = centeredChordRootCandidateWeight(
+      lowestMidi: bounds.lowestMidi,
+      highestMidi: bounds.highestMidi,
+    );
+    final registerWeight = chordRegisterWeight(
+      lowestMidi: bounds.lowestMidi,
+      highestMidi: bounds.highestMidi,
+    );
+    entries.add((
+      candidate: candidate,
+      centerWeight: centerWeight,
+      registerWeight: registerWeight,
+    ));
+    centerWeightByRegister.update(
+      registerWeight,
+      (total) => total + centerWeight,
+      ifAbsent: () => centerWeight,
+    );
+  }
+  if (entries.isEmpty) return null;
+
+  final weights = <double>[
+    for (final entry in entries)
+      entry.registerWeight *
+          entry.centerWeight /
+          centerWeightByRegister[entry.registerWeight]!,
+  ];
+  final totalWeight = weights.fold<double>(0.0, (sum, weight) => sum + weight);
+  var ticket = random.nextDouble() * totalWeight;
+  for (var index = 0; index < entries.length; index += 1) {
+    ticket -= weights[index];
+    if (ticket < 0) return entries[index].candidate;
+  }
+  return entries.last.candidate;
+}
+
 int randomOvertoneBaseMidiNote(
-  IntRange multiplierRange, {
+  Iterable<int> ratioValues, {
   math.Random? random,
 }) {
-  final candidates = overtoneBaseCandidates(multiplierRange);
+  final values = ratioValues.toList(growable: false);
+  final candidates = overtoneBaseCandidates(values);
   if (candidates.isEmpty) {
     return lowestPlayableMidiNote;
   }
-  var totalWeight = 0;
-  for (var index = 0; index < candidates.length; index += 1) {
-    totalWeight += overtoneBaseCandidateWeight(index, candidates.length);
-  }
-  var ticket = (random ?? math.Random()).nextInt(totalWeight);
-  for (var index = 0; index < candidates.length; index += 1) {
-    ticket -= overtoneBaseCandidateWeight(index, candidates.length);
-    if (ticket < 0) {
-      return candidates[index];
-    }
-  }
-  return candidates.first;
+  final minimumValue = values.reduce(math.min);
+  final maximumValue = values.reduce(math.max);
+  final intervalSemitones =
+      12.0 * math.log(maximumValue / minimumValue) / math.ln2;
+  return randomChordRootCandidate(
+    candidates,
+    random: random ?? math.Random(),
+    boundsFor: (midiNote) => (
+      lowestMidi: midiNote.toDouble(),
+      highestMidi: midiNote + intervalSemitones,
+    ),
+  )!;
 }
 
-List<int> overtoneBaseCandidates(IntRange multiplierRange) {
-  final sanitized = sanitizeOvertoneRange(multiplierRange);
-  final highestFrequency = midiNoteFrequency(highestPlayableMidiNote);
+List<int> overtoneBaseCandidates(Iterable<int> ratioValues) {
+  final values = ratioValues.toList(growable: false);
+  if (values.isEmpty || values.any((value) => value <= 0)) {
+    return const <int>[];
+  }
+  final minimumValue = values.reduce(math.min);
   return <int>[
     for (final midiNote in fullPianoRange.values)
-      if (midiNoteFrequency(midiNote) * sanitized.upperBound <=
-          highestFrequency + 0.000001)
+      if (values.every(
+        (value) => isPlayableOvertoneFrequency(
+          midiNoteFrequency(midiNote) * value / minimumValue,
+        ),
+      ))
         midiNote,
+  ];
+}
+
+bool isPlayableOvertoneFrequency(double frequencyHz) {
+  return frequencyHz.isFinite &&
+      frequencyHz >= midiNoteFrequency(lowestPlayableMidiNote) - 0.000001 &&
+      frequencyHz <= midiNoteFrequency(highestPlayableMidiNote) + 0.000001;
+}
+
+List<double> overtoneFrequencies(
+  ChordPuzzle puzzle,
+  Iterable<int> ratioValues,
+) {
+  final baseMidiNote = puzzle.baseMidiNote;
+  if (baseMidiNote == null || puzzle.notes.isEmpty) {
+    return const <double>[];
+  }
+  final minimumValue = puzzle.notes.reduce(math.min);
+  if (minimumValue <= 0) return const <double>[];
+  final baseFrequency = midiNoteFrequency(baseMidiNote);
+  return <double>[
+    for (final value in ratioValues) baseFrequency * value / minimumValue,
   ];
 }
 

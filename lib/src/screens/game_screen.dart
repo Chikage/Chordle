@@ -32,6 +32,7 @@ class _GameScreenState extends State<GameScreen> {
   late ChordleGame _game;
   Timer? _messageTimer;
   bool _settingsLoaded = false;
+  String _overtoneInput = '';
 
   @override
   void initState() {
@@ -131,7 +132,7 @@ class _GameScreenState extends State<GameScreen> {
     ChordleMode.extra =>
       '${_game.columns} 音 · ${_extraEdo}EDO · ${extraRangeLabel(_extraEdo, _extraRange)}',
     ChordleMode.overtones =>
-      '${_game.columns} 音 · ${_currentOvertoneRange.lowerBound}–${_currentOvertoneRange.upperBound}x',
+      '${_game.columns} 音 · JI · 比例 ${_currentOvertoneRange.lowerBound}–${_currentOvertoneRange.upperBound}',
   };
 
   AudioIndicatorState get _audioIndicator => switch (_audio.status) {
@@ -168,12 +169,57 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _confirmValue() {
+    if (widget.mode == ChordleMode.overtones) {
+      _confirmOvertoneValue();
+      return;
+    }
     final message = switch (widget.mode) {
       ChordleMode.normal => '先在钢琴上选择一个音',
       ChordleMode.extra => '先在 EDO 标尺上选择一个音',
-      ChordleMode.overtones => '先在数字键盘上选择一个数字',
+      ChordleMode.overtones => throw StateError('handled above'),
     };
     _game.confirmSelectedValue(missingSelectionMessage: message);
+  }
+
+  void _inputOvertoneDigit(int digit) {
+    if (_game.status != GameStatus.playing ||
+        _overtoneInput.length >= 2 ||
+        (_overtoneInput.isEmpty && digit == 0)) {
+      return;
+    }
+    setState(() => _overtoneInput += '$digit');
+  }
+
+  void _confirmOvertoneValue() {
+    final value = int.tryParse(_overtoneInput);
+    if (value == null ||
+        value < minOvertoneMultiplier ||
+        value > maxOvertoneMultiplier) {
+      return;
+    }
+    _selectValue(value);
+    final confirmed = _game.confirmSelectedValue(
+      missingSelectionMessage: '先输入 1–99 的数字',
+    );
+    if (confirmed && mounted) setState(() => _overtoneInput = '');
+  }
+
+  void _deleteInputOrValue() {
+    if (widget.mode == ChordleMode.overtones && _overtoneInput.isNotEmpty) {
+      _backspaceOvertoneInput();
+      return;
+    }
+    _game.deleteLast();
+  }
+
+  void _backspaceOvertoneInput() {
+    if (_overtoneInput.isEmpty) return;
+    setState(
+      () => _overtoneInput = _overtoneInput.substring(
+        0,
+        _overtoneInput.length - 1,
+      ),
+    );
   }
 
   void _submit() {
@@ -184,12 +230,14 @@ class _GameScreenState extends State<GameScreen> {
         _game.submitExtraGuess(_extraEdo);
       case ChordleMode.overtones:
         _game.submitOvertoneGuess();
+        if (_overtoneInput.isNotEmpty) setState(() => _overtoneInput = '');
     }
   }
 
   Future<void> _restart() async {
     await _audio.allSoundOff();
     if (!mounted) return;
+    _overtoneInput = '';
     _game.newPuzzle(_newPuzzleFor(_settings));
     if (_audioReady) await _playTarget(durationMs: 1400);
   }
@@ -225,7 +273,10 @@ class _GameScreenState extends State<GameScreen> {
     setState(() => _settings = next);
     await _settingsService.save(next);
     if (!mounted) return;
-    if (puzzleChanged) _game.newPuzzle(_newPuzzleFor(next));
+    if (puzzleChanged) {
+      _overtoneInput = '';
+      _game.newPuzzle(_newPuzzleFor(next));
+    }
     await _audio.prepare(next.instrumentProgram);
     if (_audioReady) await _playTarget(durationMs: 1400);
   }
@@ -434,11 +485,15 @@ class _GameScreenState extends State<GameScreen> {
         : _game.status == GameStatus.won
         ? '已完成：${_game.answerText}'
         : '答案：${_game.answerText}';
-    final selectedText = selected == null
+    final selectedText = widget.mode == ChordleMode.overtones
+        ? _overtoneInput.isEmpty
+              ? '未输入数字'
+              : '输入 $_overtoneInput'
+        : selected == null
         ? switch (widget.mode) {
             ChordleMode.normal => '未选音',
             ChordleMode.extra => '未选 EDO 音',
-            ChordleMode.overtones => '未选数字',
+            ChordleMode.overtones => throw StateError('handled above'),
           }
         : '选中 ${_valueSelectionLabel(selected)}';
     final input = switch (widget.mode) {
@@ -460,11 +515,12 @@ class _GameScreenState extends State<GameScreen> {
         compact: compact,
       ),
       ChordleMode.overtones => OvertoneNumberPad(
-        low: _currentOvertoneRange.lowerBound,
-        high: _currentOvertoneRange.upperBound,
-        selected: selected,
-        valueColors: valueColors,
-        onPressed: _selectValue,
+        onDigitPressed: _inputOvertoneDigit,
+        onBackspace: _backspaceOvertoneInput,
+        onConfirm: _confirmOvertoneValue,
+        canBackspace: _overtoneInput.isNotEmpty,
+        canConfirm:
+            _game.status == GameStatus.playing && _overtoneInput.isNotEmpty,
         compact: compact,
       ),
     };
@@ -472,16 +528,19 @@ class _GameScreenState extends State<GameScreen> {
     return GameInputPanel(
       selectedText: selectedText,
       confirmText: widget.mode == ChordleMode.overtones ? '确认数字' : '确认此音',
-      canConfirm: _game.status == GameStatus.playing,
-      canDelete: _game.canDeleteLast(),
+      canConfirm:
+          _game.status == GameStatus.playing &&
+          (widget.mode != ChordleMode.overtones || _overtoneInput.isNotEmpty),
+      canDelete: _overtoneInput.isNotEmpty || _game.canDeleteLast(),
       canSubmit:
           _game.status == GameStatus.playing &&
           _game.rowIsFull(_game.currentRow),
       audioReady: _audioReady,
       onPlayTarget: () => unawaited(_playTarget()),
       onConfirm: _confirmValue,
-      onDelete: _game.deleteLast,
+      onDelete: _deleteInputOrValue,
       onSubmit: _submit,
+      deleteText: _overtoneInput.isNotEmpty ? '退格' : '删除',
       answerText: answer,
       compact: compact,
       input: input,
@@ -497,7 +556,7 @@ class _GameScreenState extends State<GameScreen> {
   String _valueSelectionLabel(int value) => switch (widget.mode) {
     ChordleMode.normal => noteLabel(value),
     ChordleMode.extra => extraStepLabel(value, _extraEdo),
-    ChordleMode.overtones => '${value}x',
+    ChordleMode.overtones => '$value',
   };
 
   Map<int, Color> _guessedValueColors() {

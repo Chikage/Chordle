@@ -5,19 +5,19 @@ import 'edo_ratio.dart';
 import 'ji_tuning.dart';
 
 const int minRatioMcqComponent = 1;
-const int maxRatioMcqComponent = 31;
+const int maxRatioMcqComponent = 127;
 const int minRatioMcqEdo = 12;
 const int maxRatioMcqEdo = 72;
 const int minRatioMcqRatioCount = 2;
 const int maxRatioMcqRatioCount = 10;
 const int minRatioMcqOptionCount = 2;
 const int maxRatioMcqOptionCount = 10;
-const double ratioMcqPreferredCenterMidi = 60.0;
-const double ratioMcqCenterSpreadSemitones = 14.0;
-const double ratioMcqEdgeWeightFloor = 0.08;
+const double ratioMcqPreferredCenterMidi = preferredChordCenterMidi;
+const double ratioMcqCenterSpreadSemitones = chordCenterSpreadSemitones;
+const double ratioMcqEdgeWeightFloor = chordEdgeWeightFloor;
 
 /// A positive rational option whose original numerator and denominator must
-/// both fit the MCQ editor's 1–31 range.
+/// both fit the MCQ editor's 1–127 range.
 ///
 /// Values are reduced immediately, so equivalent inputs such as 6/4 and 3/2
 /// compare equal and can be removed with [deduplicateRatioMcqRatios].
@@ -40,7 +40,7 @@ final class RatioMcqRatio {
     try {
       return RatioMcqRatio(numerator, denominator);
     } on RangeError catch (error) {
-      throw FormatException(error.message?.toString() ?? '比例分子和分母必须为 1–31');
+      throw FormatException(error.message?.toString() ?? '比例分子和分母必须为 1–127');
     }
   }
 
@@ -74,7 +74,7 @@ void validateRatioMcqComponents(int numerator, int denominator) {
       minRatioMcqComponent,
       maxRatioMcqComponent,
       'numerator',
-      '分子必须为 1–31 的整数',
+      '分子必须为 1–127 的整数',
     );
   }
   if (denominator < minRatioMcqComponent ||
@@ -84,7 +84,7 @@ void validateRatioMcqComponents(int numerator, int denominator) {
       minRatioMcqComponent,
       maxRatioMcqComponent,
       'denominator',
-      '分母必须为 1–31 的整数',
+      '分母必须为 1–127 的整数',
     );
   }
 }
@@ -158,21 +158,19 @@ List<RatioMcqTuning> deduplicateRatioMcqTunings(
   return List<RatioMcqTuning>.unmodifiable(tunings.toSet());
 }
 
-/// Weights an MCQ root by the midpoint of its two sounding pitches.
+/// Gives an MCQ root an unnormalized register and center score.
 ///
-/// The Gaussian center keeps the pair around middle C while the floor leaves
-/// a small but nonzero chance for questions in the edge registers. This is
-/// intentionally separate from the low-register bias used by Overtones.
+/// Overtones uses this same center-weighted distribution for the span from its
+/// lowest to highest generated JI tone.
 double ratioMcqRootCandidateWeight({
   required double rootMidi,
   required double targetMidi,
 }) {
-  final pairCenterMidi = (rootMidi + targetMidi) / 2.0;
-  final normalizedDistance =
-      (pairCenterMidi - ratioMcqPreferredCenterMidi) /
-      ratioMcqCenterSpreadSemitones;
-  final gaussian = math.exp(-0.5 * normalizedDistance * normalizedDistance);
-  return ratioMcqEdgeWeightFloor + (1.0 - ratioMcqEdgeWeightFloor) * gaussian;
+  return chordRegisterWeight(lowestMidi: rootMidi, highestMidi: targetMidi) *
+      centeredChordRootCandidateWeight(
+        lowestMidi: rootMidi,
+        highestMidi: targetMidi,
+      );
 }
 
 /// An immutable generated A/B ratio question.
@@ -386,12 +384,18 @@ int? _randomRatioMcqJiRootMidiNote(
         midiNote,
   ];
   final intervalSemitones = 12.0 * math.log(ratio.value) / math.ln2;
-  return _randomRatioMcqCandidate(
+  return randomChordRootCandidate(
     candidates,
     random: random,
-    weightFor: (midiNote) => ratioMcqRootCandidateWeight(
-      rootMidi: midiNote.toDouble(),
-      targetMidi: midiNote.toDouble() + intervalSemitones,
+    boundsFor: (midiNote) => (
+      lowestMidi: math.min(
+        midiNote.toDouble(),
+        midiNote.toDouble() + intervalSemitones,
+      ),
+      highestMidi: math.max(
+        midiNote.toDouble(),
+        midiNote.toDouble() + intervalSemitones,
+      ),
     ),
   );
 }
@@ -411,33 +415,20 @@ int? _randomRatioMcqEdoRootStep({
   final candidates = <int>[
     for (var step = first; step <= last; step += 1) step,
   ];
-  return _randomRatioMcqCandidate(
+  return randomChordRootCandidate(
     candidates,
     random: random,
-    weightFor: (rootStep) => ratioMcqRootCandidateWeight(
-      rootMidi: midiValueForExtraStep(rootStep, edo),
-      targetMidi: midiValueForExtraStep(rootStep + intervalSteps, edo),
+    boundsFor: (rootStep) => (
+      lowestMidi: math.min(
+        midiValueForExtraStep(rootStep, edo),
+        midiValueForExtraStep(rootStep + intervalSteps, edo),
+      ),
+      highestMidi: math.max(
+        midiValueForExtraStep(rootStep, edo),
+        midiValueForExtraStep(rootStep + intervalSteps, edo),
+      ),
     ),
   );
-}
-
-T? _randomRatioMcqCandidate<T>(
-  List<T> candidates, {
-  required math.Random random,
-  required double Function(T candidate) weightFor,
-}) {
-  if (candidates.isEmpty) return null;
-
-  final weights = <double>[
-    for (final candidate in candidates) weightFor(candidate),
-  ];
-  final totalWeight = weights.fold<double>(0.0, (sum, weight) => sum + weight);
-  var ticket = random.nextDouble() * totalWeight;
-  for (var index = 0; index < candidates.length; index += 1) {
-    ticket -= weights[index];
-    if (ticket < 0) return candidates[index];
-  }
-  return candidates.last;
 }
 
 final class RatioMcqSubmission {

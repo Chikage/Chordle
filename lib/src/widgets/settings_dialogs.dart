@@ -259,8 +259,8 @@ Future<ChordleSettings?> showOvertoneSettingsDialog(
             ),
           ),
           children: [
-            Text('倍频范围：${range.lowerBound}–${range.upperBound}x'),
-            const _HintText('可选 1–31 内的正整数子区间；最高值至少为最低值的 2 倍，区间端点会包含在内。'),
+            Text('比例数字范围：${range.lowerBound}–${range.upperBound}'),
+            const _HintText('从 1–99 的正整数子区间抽取比例；区间至少包含两个数字，端点包含在内。'),
             _LabeledSlider(
               label: '音的个数：$toneCount（最多 $toneMax）',
               value: toneCount.toDouble(),
@@ -285,7 +285,7 @@ Future<ChordleSettings?> showOvertoneSettingsDialog(
               onChanged: (value) => setState(() => preview = value),
             ),
             Text(
-              '倍频两端：${range.lowerBound}x / ${range.upperBound}x',
+              '比例两端：${range.lowerBound} / ${range.upperBound}',
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
             RangeSlider(
@@ -303,7 +303,9 @@ Future<ChordleSettings?> showOvertoneSettingsDialog(
                 toneCount = sanitizeOvertoneToneCount(toneCount, range);
               }),
             ),
-            const _HintText('每局会按最高倍频限制随机基音，保证播放的最高频率不超过 C8。'),
+            const _HintText(
+              '固定使用 JI：先按 MCQ 的音区概率选择实际最低音，再以本题最小数字为基准生成其余频率，并保证全部位于 A0–C8。',
+            ),
             _PresetButtons(
               leftLabel: '默认',
               rightLabel: '全范围',

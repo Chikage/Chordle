@@ -59,9 +59,10 @@ void main() {
       'ratioMcqRatios': <Object?>[
         '6/4',
         '3/2',
-        '31/1',
-        '32/1',
-        '62/2',
+        '127/1',
+        '128/1',
+        '126/84',
+        '254/2',
         '0/1',
         '-1/2',
         '4/3',
@@ -80,7 +81,7 @@ void main() {
     expect(settings.ratioMcqEdos, <int>[12, 24, 72]);
     expect(settings.ratioMcqRatios, <String>[
       '3/2',
-      '31/1',
+      '127/1',
       '4/3',
       '5/4',
       '6/5',
@@ -97,7 +98,7 @@ void main() {
     final settings = ChordleSettings.fromMap(const <Object?, Object?>{
       'ratioMcqEdos': '[11,73,"bad"]',
       'ratioMcqJiEnabled': false,
-      'ratioMcqRatios': '["0/1","32/1","3/2"]',
+      'ratioMcqRatios': '["0/1","128/1","3/2"]',
       'ratioMcqOptionCount': 1,
       'ratioMcqConfigured': 'true',
     });

@@ -103,9 +103,38 @@ void main() {
 
     await tester.enterText(
       find.byKey(const ValueKey<String>('ratio-numerator-field')),
-      '31',
+      '127',
     );
-    expect(find.text('31'), findsOneWidget);
+    expect(find.text('127'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('accepts components through 127 and adds reduced ratios', (
+    tester,
+  ) async {
+    await _useSurface(tester, const Size(390, 844));
+    _mockPlatformChannel(_ratioSettings(configured: false));
+
+    await _pumpScreen(tester);
+
+    await _addRatio(tester, numerator: '126', denominator: '84');
+    expect(
+      find.byKey(const ValueKey<String>('ratio-chip-3/2')),
+      findsOneWidget,
+    );
+
+    await _addRatio(tester, numerator: '127', denominator: '126');
+    expect(
+      find.byKey(const ValueKey<String>('ratio-chip-127/126')),
+      findsOneWidget,
+    );
+
+    await _addRatio(tester, numerator: '128', denominator: '1');
+    expect(find.text('分子和分母都必须是 1–127 的整数'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('ratio-chip-128/1')),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:chordle/src/game/chord_game.dart';
 import 'package:chordle/src/game/edo_ratio.dart';
 import 'package:chordle/src/game/ji_tuning.dart';
 import 'package:chordle/src/game/ratio_mcq_game.dart';
@@ -8,14 +9,14 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('MCQ ratio validation', () {
     test('validates raw components before reducing the ratio', () {
-      expect(RatioMcqRatio(1, 31).label, '1/31');
-      expect(RatioMcqRatio(31, 1).label, '31/1');
-      expect(RatioMcqRatio(30, 20).label, '3/2');
+      expect(RatioMcqRatio(1, 127).label, '1/127');
+      expect(RatioMcqRatio(127, 1).label, '127/1');
+      expect(RatioMcqRatio(126, 84).label, '3/2');
       expect(() => RatioMcqRatio(0, 1), throwsRangeError);
       expect(() => RatioMcqRatio(-1, 1), throwsRangeError);
       expect(() => RatioMcqRatio(1, 0), throwsRangeError);
-      expect(() => RatioMcqRatio(32, 16), throwsRangeError);
-      expect(() => RatioMcqRatio(16, 32), throwsRangeError);
+      expect(() => RatioMcqRatio(128, 64), throwsRangeError);
+      expect(() => RatioMcqRatio(64, 128), throwsRangeError);
     });
 
     test('parses a/b and deduplicates equivalent reduced ratios', () {
@@ -30,7 +31,8 @@ void main() {
       expect(first, second);
       expect(unique, <RatioMcqRatio>[second, RatioMcqRatio(5, 4)]);
       expect(() => parseRatioMcqRatio('3'), throwsFormatException);
-      expect(() => parseRatioMcqRatio('32/16'), throwsFormatException);
+      expect(parseRatioMcqRatio('126/84').label, '3/2');
+      expect(() => parseRatioMcqRatio('128/64'), throwsFormatException);
       expect(() => parseRatioMcqRatio('3/0'), throwsFormatException);
     });
   });
@@ -94,28 +96,33 @@ void main() {
   });
 
   group('question generation', () {
-    test('MCQ root weighting centers the whole pair around middle C', () {
+    test('MCQ root weighting prioritizes the C3-C6 register', () {
       final centered = ratioMcqRootCandidateWeight(
-        rootMidi: 56,
-        targetMidi: 64,
+        rootMidi: 62,
+        targetMidi: 70,
       );
       final equallyLow = ratioMcqRootCandidateWeight(
-        rootMidi: 40,
-        targetMidi: 50,
+        rootMidi: 44,
+        targetMidi: 58,
       );
       final equallyHigh = ratioMcqRootCandidateWeight(
-        rootMidi: 70,
-        targetMidi: 80,
+        rootMidi: 74,
+        targetMidi: 88,
       );
       final edge = ratioMcqRootCandidateWeight(rootMidi: 21, targetMidi: 21);
 
-      expect(centered, closeTo(1, 0.000000001));
+      expect(centered, closeTo(preferredChordRegisterWeight, 0.000000001));
+      expect(
+        centered,
+        preferredChordRegisterWeight *
+            centeredChordRootCandidateWeight(lowestMidi: 62, highestMidi: 70),
+      );
       expect(equallyLow, closeTo(equallyHigh, 0.000000001));
       expect(centered, greaterThan(equallyLow));
-      expect(edge, greaterThanOrEqualTo(ratioMcqEdgeWeightFloor));
+      expect(edge, lessThan(outsideChordRegisterWeight));
     });
 
-    test('generated EDO and JI pairs favor the C3-C5 middle register', () {
+    test('generated EDO and JI pairs overwhelmingly stay in C3-C6', () {
       for (final tuning in <RatioMcqTuning>[
         RatioMcqTuning.edo(12),
         const RatioMcqTuning.ji(),
@@ -126,21 +133,28 @@ void main() {
           optionCount: 2,
           random: math.Random(20260720),
         );
-        var middleRegisterCount = 0;
+        var preferredRegisterCount = 0;
+        var outsideRegisterCount = 0;
         const drawCount = 1200;
 
         for (var index = 0; index < drawCount; index += 1) {
           final question = generator.nextQuestion();
-          final pairCenterMidi =
-              (midiValueForFrequency(question.frequencyAHz) +
-                  midiValueForFrequency(question.frequencyBHz)) /
-              2.0;
-          if (pairCenterMidi >= 48 && pairCenterMidi <= 72) {
-            middleRegisterCount += 1;
+          final midiA = midiValueForFrequency(question.frequencyAHz);
+          final midiB = midiValueForFrequency(question.frequencyBHz);
+          final lowestMidi = math.min(midiA, midiB);
+          final highestMidi = math.max(midiA, midiB);
+          if (lowestMidi >= preferredChordMidiRange.lowerBound &&
+              highestMidi <= preferredChordMidiRange.upperBound) {
+            preferredRegisterCount += 1;
+          }
+          if (lowestMidi < extendedChordMidiRange.lowerBound ||
+              highestMidi > extendedChordMidiRange.upperBound) {
+            outsideRegisterCount += 1;
           }
         }
 
-        expect(middleRegisterCount, greaterThan(drawCount ~/ 2));
+        expect(preferredRegisterCount, greaterThan(drawCount * 85 ~/ 100));
+        expect(outsideRegisterCount, lessThan(drawCount * 2 ~/ 100));
       }
     });
 
@@ -243,7 +257,7 @@ void main() {
       ]) {
         final generator = RatioMcqQuestionGenerator(
           tunings: <RatioMcqTuning>[tuning],
-          ratios: <RatioMcqRatio>[RatioMcqRatio(1, 31), RatioMcqRatio(31, 1)],
+          ratios: <RatioMcqRatio>[RatioMcqRatio(1, 127), RatioMcqRatio(127, 1)],
           optionCount: 2,
           random: math.Random(20260719),
         );

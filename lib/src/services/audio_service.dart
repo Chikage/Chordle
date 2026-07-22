@@ -154,15 +154,9 @@ class AudioService extends ChangeNotifier {
     }
   }
 
-  List<PlaybackTone> _overtoneTones(ChordPuzzle puzzle, List<int> multipliers) {
-    final baseMidiNote = puzzle.baseMidiNote;
-    if (baseMidiNote == null) {
-      return const <PlaybackTone>[];
-    }
-    final baseFrequency = 440.0 * math.pow(2, (baseMidiNote - 69) / 12.0);
-    return multipliers
-        .map((multiplier) {
-          final frequency = baseFrequency * multiplier;
+  List<PlaybackTone> _overtoneTones(ChordPuzzle puzzle, List<int> ratioValues) {
+    return overtoneFrequencies(puzzle, ratioValues)
+        .map((frequency) {
           final midiValue =
               69.0 + 12.0 * (math.log(frequency / 440.0) / math.ln2);
           final key = midiValue.round().clamp(0, 108);

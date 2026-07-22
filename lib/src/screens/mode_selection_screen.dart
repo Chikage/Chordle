@@ -41,7 +41,7 @@ extension on _HomeMode {
     _HomeMode.extra => '1–72 EDO 微分音听辨',
     _HomeMode.ratioMcq => '在 EDO 与纯律中辨认有理比例',
     _HomeMode.free => '自由设置并试听 EDO 和弦',
-    _HomeMode.overtones => '基音与整数倍频听辨',
+    _HomeMode.overtones => '随机最低音上的 JI 整数比例听辨',
   };
 
   Color? get buttonBackgroundColor => switch (this) {

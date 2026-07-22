@@ -16,12 +16,13 @@ Future<void> showChordleHelpDialog(BuildContext context, ChordleMode mode) {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (mode == ChordleMode.overtones) ...[
-                const Text('每局会随机选择一个基音，并从设置的整数区间生成倍频数组。'),
+                const Text('每局固定使用 JI，从设置区间抽取整数比例，并按 MCQ 的音区概率选择可听的实际最低音。'),
                 const SizedBox(height: 8),
                 const Text(
-                  '可按任意顺序输入倍频数，提交后按从小到大的答案位置验证。'
+                  '最小数字对应实际最低音，其余音按相对最小数字的精确频率比生成。'
+                  '可按任意顺序输入比例数字，提交后按从小到大的答案位置验证。'
                   '整组数字约分后比例相同也算正确，且适用于两个或多个数字。'
-                  '例如 8:10 与 4:5、12:15 等价，8:12:14 与 4:6:7、12:18:21 等价。',
+                  '例如 8:10:15 会播放为 1、10/8、15/8；约分等价答案仍然正确。',
                 ),
               ] else ...[
                 const Text('会按设置随机播放 1–10 个音，1 为单音测试。'),

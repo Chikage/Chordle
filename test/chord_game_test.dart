@@ -776,80 +776,157 @@ void main() {
       expect(sanitizeMidiProgramNumber(200), 127);
     });
 
-    test('overtone range keeps a legal multiplier window', () {
+    test('overtone range keeps at least two selectable values through 99', () {
       expect(
         sanitizeOvertoneRange(const IntRange(8, 16)),
         const IntRange(8, 16),
       );
-      expect(sanitizeOvertoneRange(const IntRange(1, 2)), const IntRange(1, 3));
+      expect(sanitizeOvertoneRange(const IntRange(1, 2)), const IntRange(1, 2));
       expect(
         sanitizeOvertoneRange(const IntRange(20, 31)),
-        const IntRange(15, 31),
+        const IntRange(20, 31),
+      );
+      expect(
+        sanitizeOvertoneRange(const IntRange(99, 99)),
+        const IntRange(98, 99),
       );
     });
 
     test('overtone tone count depends on the sanitized range size', () {
-      expect(sanitizeOvertoneToneCount(10, const IntRange(1, 3)), 2);
+      expect(sanitizeOvertoneToneCount(10, const IntRange(1, 3)), 3);
       expect(sanitizeOvertoneToneCount(4, const IntRange(8, 16)), 4);
-      expect(sanitizeOvertoneToneCount(10, const IntRange(8, 16)), 8);
-      expect(sanitizeOvertoneToneCount(30, const IntRange(1, 31)), 10);
+      expect(sanitizeOvertoneToneCount(10, const IntRange(8, 16)), 9);
+      expect(sanitizeOvertoneToneCount(30, const IntRange(1, 99)), 10);
     });
 
-    test('base candidate weights favor lower notes', () {
-      final candidates = overtoneBaseCandidates(const IntRange(16, 31));
-      final middleIndex = (candidates.length - 1) ~/ 2;
-
+    test('register weights prioritize complete C3-C6 chords', () {
       expect(
-        overtoneBaseCandidateWeight(0, candidates.length),
-        greaterThan(
-          overtoneBaseCandidateWeight(middleIndex, candidates.length),
-        ),
+        chordRegisterWeight(lowestMidi: 48, highestMidi: 84),
+        preferredChordRegisterWeight,
       );
       expect(
-        overtoneBaseCandidateWeight(middleIndex, candidates.length),
-        greaterThan(
-          overtoneBaseCandidateWeight(candidates.length - 1, candidates.length),
-        ),
+        chordRegisterWeight(lowestMidi: 47, highestMidi: 84),
+        extendedChordRegisterWeight,
       );
-    });
-
-    test('weighted random base strongly favors the lower half', () {
-      final candidates = overtoneBaseCandidates(const IntRange(16, 31));
-      final midpoint = candidates[candidates.length ~/ 2];
-      final random = math.Random(20260709);
-      final draws = <int>[
-        for (var index = 0; index < 400; index += 1)
-          randomOvertoneBaseMidiNote(const IntRange(16, 31), random: random),
-      ];
-
       expect(
-        draws.where((note) => note <= midpoint).length,
-        greaterThan(draws.length * 3 ~/ 4),
+        chordRegisterWeight(lowestMidi: 36, highestMidi: 96),
+        extendedChordRegisterWeight,
+      );
+      expect(
+        chordRegisterWeight(lowestMidi: 35, highestMidi: 96),
+        outsideChordRegisterWeight,
+      );
+      expect(
+        chordRegisterWeight(lowestMidi: 97, highestMidi: 60),
+        outsideChordRegisterWeight,
       );
     });
 
-    test('random overtone puzzle stays in range and below C8', () {
-      final random = math.Random(13);
-      for (var iteration = 0; iteration < 50; iteration += 1) {
-        final puzzle = ChordPuzzle.randomOvertones(
-          toneCount: 4,
-          multiplierRange: const IntRange(8, 16),
+    test('base candidate weights center on the C3-C6 region', () {
+      final centered = centeredChordRootCandidateWeight(
+        lowestMidi: 60,
+        highestMidi: 72,
+      );
+      final equallyLow = centeredChordRootCandidateWeight(
+        lowestMidi: 42,
+        highestMidi: 54,
+      );
+      final equallyHigh = centeredChordRootCandidateWeight(
+        lowestMidi: 78,
+        highestMidi: 90,
+      );
+      final farOutside = centeredChordRootCandidateWeight(
+        lowestMidi: 21,
+        highestMidi: 33,
+      );
+
+      expect(centered, closeTo(1, 0.000000001));
+      expect(equallyLow, closeTo(equallyHigh, 0.000000001));
+      expect(centered, greaterThan(equallyLow));
+      expect(farOutside, lessThan(equallyLow));
+    });
+
+    test('random bases overwhelmingly keep the full chord in C3-C6', () {
+      const ratioValues = <int>[8, 10, 12, 15];
+      final random = math.Random(20260722);
+      var preferredCount = 0;
+      var outsideCount = 0;
+      const drawCount = 2000;
+      final intervalSemitones = 12 * math.log(15 / 8) / math.ln2;
+
+      for (var index = 0; index < drawCount; index += 1) {
+        final lowestMidi = randomOvertoneBaseMidiNote(
+          ratioValues,
           random: random,
-        );
-        final baseMidiNote = puzzle.baseMidiNote!;
-        final highestFrequency =
-            midiNoteFrequency(baseMidiNote) * puzzle.notes.last;
-
-        expect(puzzle.notes, hasLength(4));
-        expect(puzzle.notes, orderedEquals(<int>[...puzzle.notes]..sort()));
-        expect(puzzle.notes, everyElement(inInclusiveRange(8, 16)));
-        expect(
-          highestFrequency,
-          lessThanOrEqualTo(
-            midiNoteFrequency(highestPlayableMidiNote) + 0.000001,
-          ),
-        );
+        ).toDouble();
+        final highestMidi = lowestMidi + intervalSemitones;
+        if (lowestMidi >= preferredChordMidiRange.lowerBound &&
+            highestMidi <= preferredChordMidiRange.upperBound) {
+          preferredCount += 1;
+        }
+        if (lowestMidi < extendedChordMidiRange.lowerBound ||
+            highestMidi > extendedChordMidiRange.upperBound) {
+          outsideCount += 1;
+        }
       }
+
+      expect(preferredCount, greaterThan(drawCount * 85 ~/ 100));
+      expect(outsideCount, lessThan(drawCount * 2 ~/ 100));
     });
+
+    test(
+      'base candidates depend on the actual ratio instead of the range cap',
+      () {
+        final actualRatioCandidates = overtoneBaseCandidates(<int>[8, 10, 15]);
+        final oldMultiplierCandidates = overtoneBaseCandidates(<int>[8, 99]);
+
+        expect(
+          actualRatioCandidates.last,
+          greaterThan(oldMultiplierCandidates.last),
+        );
+        final highestActualFrequency =
+            midiNoteFrequency(actualRatioCandidates.last) * 15 / 8;
+        expect(isPlayableOvertoneFrequency(highestActualFrequency), isTrue);
+      },
+    );
+
+    test('8:10:15 starts at the lowest tone and uses exact JI ratios', () {
+      final puzzle = ChordPuzzle(
+        notes: const <int>[8, 10, 15],
+        label: 'test',
+        baseMidiNote: 48,
+      );
+      final baseFrequency = midiNoteFrequency(48);
+
+      expect(overtoneFrequencies(puzzle, puzzle.notes), <Matcher>[
+        closeTo(baseFrequency, 0.000001),
+        closeTo(baseFrequency * 10 / 8, 0.000001),
+        closeTo(baseFrequency * 15 / 8, 0.000001),
+      ]);
+    });
+
+    test(
+      'random overtone puzzles use JI ratios and keep every tone playable',
+      () {
+        final random = math.Random(13);
+        for (var iteration = 0; iteration < 200; iteration += 1) {
+          final puzzle = ChordPuzzle.randomOvertones(
+            toneCount: 4,
+            multiplierRange: const IntRange(1, 99),
+            random: random,
+          );
+          final frequencies = overtoneFrequencies(puzzle, puzzle.notes);
+
+          expect(puzzle.notes, hasLength(4));
+          expect(puzzle.notes, orderedEquals(<int>[...puzzle.notes]..sort()));
+          expect(puzzle.notes, everyElement(inInclusiveRange(1, 99)));
+          expect(frequencies, hasLength(puzzle.notes.length));
+          expect(
+            frequencies,
+            everyElement(predicate(isPlayableOvertoneFrequency)),
+          );
+        }
+      },
+    );
   });
 }
